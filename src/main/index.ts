@@ -15,7 +15,14 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { syncDefaultSessionsInBatches, type IndexStatus } from "../core/indexer";
 import { formatSessionMarkdown, formatSessionPlainText } from "../core/format-session";
-import { defaultSettings, getResumeCommand, openNativeApp, openResumeInTerminal, revealInFileManager } from "../core/platform";
+import {
+  defaultSettings,
+  getResumeCommand,
+  openNativeApp,
+  openResumeInSpecificTerminal,
+  openResumeInTerminal,
+  revealInFileManager,
+} from "../core/platform";
 import { SessionStore } from "../core/session-store";
 import type { AppSettings } from "../core/platform";
 import type { SearchOptions } from "../core/types";
@@ -266,6 +273,12 @@ function registerIpc(): void {
     if (!session) return;
     store.markResumed(sessionKey);
     await openResumeInTerminal(session, getSettings());
+  });
+  ipcMain.handle("command:resume-iterm", async (_event, sessionKey: string) => {
+    const session = store.getSession(sessionKey);
+    if (!session) return;
+    store.markResumed(sessionKey);
+    await openResumeInSpecificTerminal(session, getSettings(), "iTerm");
   });
   ipcMain.handle("command:open-app", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);

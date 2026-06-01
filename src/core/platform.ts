@@ -43,9 +43,20 @@ export async function openResumeInTerminal(session: SessionSearchResult, setting
   }
 
   if (settings.defaultTerminal === "iTerm") {
-    await runAppleScript(`tell application "iTerm"
+    await runAppleScript(`set wasRunning to application "iTerm" is running
+tell application "iTerm"
   activate
-  if (count of windows) = 0 then create window with default profile
+  if wasRunning then
+    if (count of windows) = 0 then
+      create window with default profile
+    else
+      tell current window
+        create tab with default profile
+      end tell
+    end if
+  else
+    delay 0.3
+  end if
   tell current session of current window
     write text "${escapeAppleScript(command)}"
   end tell
@@ -75,6 +86,14 @@ end tell`);
   activate
   do script "${escapeAppleScript(command)}"
 end tell`);
+}
+
+export async function openResumeInSpecificTerminal(
+  session: SessionSearchResult,
+  settings: AppSettings,
+  terminal: AppSettings["defaultTerminal"],
+): Promise<void> {
+  await openResumeInTerminal(session, { ...settings, defaultTerminal: terminal });
 }
 
 export async function openNativeApp(source: SessionSource): Promise<void> {

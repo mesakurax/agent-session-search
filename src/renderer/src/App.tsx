@@ -484,6 +484,9 @@ export function App(): ReactElement {
           onResume={() =>
             void runAction("Opening terminal", () => window.sessionSearch.resumeSession(detail.sessionKey), "Resume command sent to terminal.")
           }
+          onResumeIterm={() =>
+            void runAction("Opening iTerm", () => window.sessionSearch.resumeSessionInIterm(detail.sessionKey), "Resume command sent to iTerm.")
+          }
           onCopyResume={() =>
             void runAction("Copying resume command", () => window.sessionSearch.copyResumeCommand(detail.sessionKey), "Resume command copied.")
           }
@@ -521,6 +524,9 @@ export function App(): ReactElement {
           }
           onResume={() =>
             void runAction("Opening terminal", () => window.sessionSearch.resumeSession(contextMenu.session.sessionKey), "Resume command sent to terminal.")
+          }
+          onResumeIterm={() =>
+            void runAction("Opening iTerm", () => window.sessionSearch.resumeSessionInIterm(contextMenu.session.sessionKey), "Resume command sent to iTerm.")
           }
           onOpenApp={() =>
             void runAction("Opening native app", () => window.sessionSearch.openNativeApp(contextMenu.session.sessionKey), "Native app opened.")
@@ -634,6 +640,7 @@ function DetailPanel({
   onRemoveTag,
   onFavorite,
   onResume,
+  onResumeIterm,
   onCopyResume,
   onCopyMarkdown,
   onCopyPlain,
@@ -651,6 +658,7 @@ function DetailPanel({
   onRemoveTag: (tagName: string) => void;
   onFavorite: () => void;
   onResume: () => void;
+  onResumeIterm: () => void;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
   onCopyPlain: () => void;
@@ -731,6 +739,9 @@ function DetailPanel({
         <button onClick={onResume} disabled={actionRunning}>
           <Play size={15} /> Resume
         </button>
+        <button onClick={onResumeIterm} disabled={actionRunning}>
+          <Terminal size={15} /> iTerm
+        </button>
         <button onClick={onRename} disabled={actionRunning}>
           <Clipboard size={15} /> Rename
         </button>
@@ -808,6 +819,7 @@ function ContextMenu({
   onPin,
   onHide,
   onResume,
+  onResumeIterm,
   onOpenApp,
   onCopyResume,
   onCopyMarkdown,
@@ -821,6 +833,7 @@ function ContextMenu({
   onPin: () => void;
   onHide: () => void;
   onResume: () => void;
+  onResumeIterm: () => void;
   onOpenApp: () => void;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
@@ -846,6 +859,9 @@ function ContextMenu({
       <hr />
       <button onClick={onResume}>
         <Play size={14} /> Resume in Terminal
+      </button>
+      <button onClick={onResumeIterm}>
+        <Terminal size={14} /> Resume in iTerm
       </button>
       <button onClick={onOpenApp}>
         <AppWindow size={14} /> Open App

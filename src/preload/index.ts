@@ -23,6 +23,7 @@ const api = {
   setSettings: (settings: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
   copyResumeCommand: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-resume", sessionKey),
   resumeSession: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:resume", sessionKey),
+  resumeSessionInIterm: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:resume-iterm", sessionKey),
   openNativeApp: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:open-app", sessionKey),
   revealSession: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:reveal", sessionKey),
   copyMarkdown: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-markdown", sessionKey),
