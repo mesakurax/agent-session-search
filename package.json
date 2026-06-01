@@ -22,7 +22,7 @@
     "rebuild:node": "npm rebuild better-sqlite3",
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
-    "prepack": "electron-vite build"
+    "prepare": "electron-vite build"
   },
   "dependencies": {
     "@electron/rebuild": "^3.7.1",

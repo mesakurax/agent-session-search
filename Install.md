@@ -2,10 +2,10 @@
 
 ## 安装并使用（给使用者）
 
-只要本机有 **Node.js 20+** 和 **Git**，复制下面这一行到终端回车即可安装：
+只要本机有 **Node.js 20+**，复制下面这一行到终端回车即可安装（会自动下载、构建并注册命令）：
 
 ```bash
-git clone https://github.com/zszz3/agent-session-search.git && cd agent-session-search && npm install && npm run build && npm install -g .
+npm install -g git+https://github.com/zszz3/agent-session-search.git
 ```
 
 装好后，在任意终端运行即可启动：
@@ -20,8 +20,7 @@ agent-session-search
 
 - macOS
 - Node.js 20 或更高版本（含 npm）
-- Git
-- 首次安装会编译原生模块 `better-sqlite3`，需要 **Xcode Command Line Tools**。若提示缺少编译工具，先执行一次：
+- 首次安装会编译原生模块 `better-sqlite3`，需要 **Xcode Command Line Tools**。若提示缺少编译工具，先执行一次再重装：
 
   ```bash
   xcode-select --install
@@ -31,14 +30,24 @@ agent-session-search
 
 ### 更新到新版本
 
+重新跑一次安装命令即可拉取并安装最新版：
+
 ```bash
-cd agent-session-search && git pull && npm install && npm run build && npm install -g .
+npm install -g git+https://github.com/zszz3/agent-session-search.git
 ```
 
 ### 卸载
 
 ```bash
 npm uninstall -g agent-session-search
+```
+
+### 备选：从源码克隆安装
+
+如果你想改代码或离线安装，也可以克隆后本地安装：
+
+```bash
+git clone https://github.com/zszz3/agent-session-search.git && cd agent-session-search && npm install && npm install -g .
 ```
 
 ---
