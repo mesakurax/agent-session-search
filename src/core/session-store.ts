@@ -358,6 +358,17 @@ export class SessionStore {
     clear();
   }
 
+  deleteSessionsBySource(sources: SessionSource[]): void {
+    if (sources.length === 0) return;
+    const placeholders = sources.map(() => "?").join(", ");
+    const remove = this.db.transaction(() => {
+      this.db.prepare(`DELETE FROM session_fts WHERE session_key IN (SELECT session_key FROM sessions WHERE source IN (${placeholders}))`).run(...sources);
+      this.db.prepare(`DELETE FROM sessions WHERE source IN (${placeholders})`).run(...sources);
+      this.deleteUnusedTags();
+    });
+    remove();
+  }
+
   private migrate(): void {
     this.db.pragma("foreign_keys = ON");
     this.db.exec(`
@@ -492,6 +503,21 @@ export class SessionStore {
       `,
       )
       .run(tagName);
+  }
+
+  private deleteUnusedTags(): void {
+    this.db
+      .prepare(
+        `
+        DELETE FROM tags
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM session_tags
+          WHERE session_tags.tag_id = tags.id
+        )
+      `,
+      )
+      .run();
   }
 
   private addTagToSession(sessionKey: string, tagName: string): void {
