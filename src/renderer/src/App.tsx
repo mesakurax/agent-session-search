@@ -231,6 +231,16 @@ export function App(): ReactElement {
       // Leave list navigation alone while an overlay or menu is in front.
       if (detail || dialog || deleteTagName || contextMenu) return;
 
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        event.preventDefault();
+        if (actionStatus?.kind === "running" || !selectedKey) return;
+        const session = results.find((item) => item.sessionKey === selectedKey);
+        if (session) {
+          void runAction("Opening terminal", () => window.sessionSearch.resumeSession(session.sessionKey), "Resume command sent to terminal.");
+        }
+        return;
+      }
+
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         if (results.length === 0) return;
         event.preventDefault();
@@ -259,7 +269,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [results, selectedKey, detail, dialog, deleteTagName, contextMenu]);
+  }, [results, selectedKey, detail, dialog, deleteTagName, contextMenu, actionStatus]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -563,12 +573,15 @@ export function App(): ReactElement {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && selected) void openDetail(selected);
+                if (!event.metaKey && !event.ctrlKey && event.key === "Enter" && selected) void openDetail(selected);
               }}
               placeholder={searchPlaceholder}
               autoFocus
             />
             <span className="kbd-hint">⌘K</span>
+            <span className="kbd-hint" title="Resume selected session in the default terminal">
+              ⌘↵
+            </span>
           </div>
           {selectedProject ? (
             <button className="chip clear" onClick={() => setProjectPath(undefined)} title={selectedProject.path}>
