@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getResumeCommand, resolveMacApplicationName, defaultTerminalFor, terminalOptionsFor, normalizeTerminal } from "./platform";
+import { getResumeCommand, resolveMacApplicationName, defaultTerminalFor, terminalOptionsFor, normalizeTerminal, defaultSettings } from "./platform";
 import type { SessionSearchResult } from "./types";
 
 describe("platform application resolution", () => {
@@ -32,6 +32,30 @@ describe("resume commands", () => {
     } as SessionSearchResult;
 
     expect(getResumeCommand(session)).toBe("cd /repo && codebuddy --resume codebuddy-1");
+  });
+
+  it("builds a cmd-compatible cd prefix on Windows", () => {
+    const session = {
+      source: "claude-cli",
+      rawId: "abc",
+      projectPath: "C:\\my repo",
+    } as SessionSearchResult;
+
+    expect(getResumeCommand(session, defaultSettings, { platform: "win32" })).toBe(
+      'cd /d "C:\\my repo" && claude --resume abc',
+    );
+  });
+
+  it("omits the cd prefix when withCwd is false", () => {
+    const session = {
+      source: "claude-cli",
+      rawId: "abc",
+      projectPath: "C:\\my repo",
+    } as SessionSearchResult;
+
+    expect(getResumeCommand(session, defaultSettings, { platform: "win32", withCwd: false })).toBe(
+      "claude --resume abc",
+    );
   });
 });
 

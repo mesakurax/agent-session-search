@@ -54,9 +54,9 @@ export function sourceFamily(source: SessionSource): "claude" | "codex" | "codeb
 export function getResumeCommand(
   session: SessionSearchResult,
   settings: AppSettings = defaultSettings,
-  opts: { withCwd?: boolean; skipPermissions?: boolean } = {},
+  opts: { withCwd?: boolean; skipPermissions?: boolean; platform?: NodeJS.Platform } = {},
 ): string {
-  const { withCwd = true, skipPermissions = false } = opts;
+  const { withCwd = true, skipPermissions = false, platform = process.platform } = opts;
   let cmd: string;
   const family = sourceFamily(session.source);
   if (family === "claude") {
@@ -68,7 +68,12 @@ export function getResumeCommand(
     cmd = `${settings.codexBinary} resume ${session.rawId}`;
     if (skipPermissions) cmd += " --dangerously-bypass-approvals-and-sandbox";
   }
-  if (withCwd && session.projectPath) cmd = `cd ${shellQuote(session.projectPath)} && ${cmd}`;
+  if (withCwd && session.projectPath) {
+    cmd =
+      platform === "win32"
+        ? `cd /d ${winQuote(session.projectPath)} && ${cmd}`
+        : `cd ${shellQuote(session.projectPath)} && ${cmd}`;
+  }
   return cmd;
 }
 
@@ -168,6 +173,11 @@ export async function revealInFileManager(targetPath: string): Promise<void> {
 function shellQuote(s: string): string {
   if (/^[A-Za-z0-9_\-./]+$/.test(s)) return s;
   return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+function winQuote(s: string): string {
+  // cmd.exe quoting: wrap in double quotes, double any embedded quotes.
+  return `"${s.replace(/"/g, '""')}"`;
 }
 
 function escapeAppleScript(s: string): string {
