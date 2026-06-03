@@ -30,6 +30,7 @@ import { loadUsageQuotaSnapshot } from "../core/quota";
 import { focusLiveSessionTerminal, liveSessionPidForSession } from "../core/session-focus";
 import { loadLiveSessionSnapshot } from "../core/session-activity";
 import { SessionStore } from "../core/session-store";
+import { listInstalledSkills } from "../core/skill-manager";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
 import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts";
 import type { AppSettings } from "../core/platform";
@@ -366,6 +367,13 @@ function registerIpc(): void {
     if (previous.includeCodexInternal && !next.includeCodexInternal) store.deleteSessionsBySource(["codex-internal"]);
     if (previous.includeCodeBuddyCli && !next.includeCodeBuddyCli) store.deleteSessionsBySource(["codebuddy-cli"]);
     return next;
+  });
+  ipcMain.handle("skills:list", () => listInstalledSkills({ projectDirs: [process.cwd()] }));
+  ipcMain.handle("skills:copy-path", (_event, skillPath: string) => {
+    clipboard.writeText(skillPath);
+  });
+  ipcMain.handle("skills:reveal", async (_event, skillPath: string) => {
+    await revealInFileManager(skillPath);
   });
   ipcMain.handle("command:copy-resume", (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);

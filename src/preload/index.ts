@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppSettings } from "../core/platform";
 import type { IndexStatus } from "../core/indexer";
+import type { InstalledSkillsSnapshot } from "../core/skill-manager";
 import type {
   LiveSessionSnapshot,
   ProjectSummary,
@@ -34,6 +35,9 @@ const api = {
   getIndexStatus: (): Promise<IndexStatus> => ipcRenderer.invoke("index:status"),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   setSettings: (settings: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
+  listSkills: (): Promise<InstalledSkillsSnapshot> => ipcRenderer.invoke("skills:list"),
+  copySkillPath: (skillPath: string): Promise<void> => ipcRenderer.invoke("skills:copy-path", skillPath),
+  revealSkill: (skillPath: string): Promise<void> => ipcRenderer.invoke("skills:reveal", skillPath),
   copyResumeCommand: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-resume", sessionKey),
   resumeSession: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:resume", sessionKey),
   resumeSessionInIterm: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:resume-iterm", sessionKey),

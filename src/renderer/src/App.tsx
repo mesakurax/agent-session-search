@@ -20,6 +20,7 @@ import {
   Keyboard,
   Languages,
   Moon,
+  PackageSearch,
   Pin,
   PinOff,
   Play,
@@ -36,6 +37,7 @@ import {
 import type { IndexStatus } from "../../core/indexer";
 import { formatMessageTime, formatRelativeTime } from "../../core/format-session";
 import type { AppSettings } from "../../core/platform";
+import type { InstalledSkill, InstalledSkillsSnapshot, SkillSource } from "../../core/skill-manager";
 import { globalShortcutOptions } from "../../core/shortcuts";
 import { terminalSelectOptions } from "../../core/terminal-options";
 import type {
@@ -67,6 +69,7 @@ import {
   type SidebarSectionsState,
 } from "./sidebar-sections";
 import { LANGUAGE_STORAGE_KEY, localize, readInitialLanguage, type LanguageMode } from "./language";
+import { filterInstalledSkills, skillSourceLabel, type SkillSourceFilter } from "./skill-manager";
 import { readInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from "./theme";
 
 const SOURCE_LABEL: Record<SessionSource, string> = {
@@ -155,6 +158,12 @@ const EMPTY_LIVE_SESSIONS: LiveSessionSnapshot = {
   sessions: [],
 };
 
+const EMPTY_SKILLS: InstalledSkillsSnapshot = {
+  skills: [],
+  roots: [],
+  scannedAt: 0,
+};
+
 function isBranchTag(tagName: string): boolean {
   return tagName.startsWith("branch:");
 }
@@ -201,6 +210,7 @@ type RefreshFeedback = ActionStatus | null;
 type StatsFeedback = ActionStatus | null;
 type QuotaFeedback = ActionStatus | null;
 type SettingsFeedback = ActionStatus | null;
+type SkillsFeedback = ActionStatus | null;
 
 interface ContextMenuState {
   x: number;
@@ -256,6 +266,10 @@ export function App(): ReactElement {
   const [actionStatus, setActionStatus] = useState<ActionStatus | null>(null);
   const [refreshFeedback, setRefreshFeedback] = useState<RefreshFeedback>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [installedSkills, setInstalledSkills] = useState<InstalledSkillsSnapshot>(EMPTY_SKILLS);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillsFeedback, setSkillsFeedback] = useState<SkillsFeedback>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback>(null);
   const [pendingPersonalSources, setPendingPersonalSources] = useState<{ claude: boolean; codex: boolean; codebuddy: boolean }>({
@@ -332,6 +346,19 @@ export function App(): ReactElement {
     }
   }, [t]);
 
+  const loadSkills = useCallback(async () => {
+    setSkillsLoading(true);
+    setSkillsFeedback(null);
+    try {
+      setInstalledSkills(await window.sessionSearch.listSkills());
+    } catch (error) {
+      setInstalledSkills(EMPTY_SKILLS);
+      setSkillsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, []);
+
   const refreshLiveSessions = useCallback(async () => {
     try {
       setLiveSessions(await window.sessionSearch.getLiveSessions());
@@ -352,6 +379,10 @@ export function App(): ReactElement {
   useEffect(() => {
     void loadQuotas();
   }, [loadQuotas]);
+
+  useEffect(() => {
+    if (skillsOpen) void loadSkills();
+  }, [skillsOpen, loadSkills]);
 
   useEffect(() => {
     void refreshLiveSessions();
@@ -389,7 +420,10 @@ export function App(): ReactElement {
       if (!nextStatus.running) void load();
     });
     const offFocus = window.sessionSearch.onFocusSearch(() => searchRef.current?.focus());
-    const offOpenSettings = window.sessionSearch.onOpenSettings(() => setSettingsOpen(true));
+    const offOpenSettings = window.sessionSearch.onOpenSettings(() => {
+      setSkillsOpen(false);
+      setSettingsOpen(true);
+    });
     return () => {
       offIndex();
       offFocus();
@@ -416,6 +450,7 @@ export function App(): ReactElement {
       if ((event.metaKey || event.ctrlKey) && event.key === ",") {
         event.preventDefault();
         setContextMenu(null);
+        setSkillsOpen(false);
         setSettingsOpen(true);
         return;
       }
@@ -432,6 +467,7 @@ export function App(): ReactElement {
         if (dialog) setDialog(null);
         else if (deleteTagName) setDeleteTagName(null);
         else if (contextMenu) setContextMenu(null);
+        else if (skillsOpen) setSkillsOpen(false);
         else if (settingsOpen) setSettingsOpen(false);
         else if (detail) closeDetail();
         else return;
@@ -440,7 +476,7 @@ export function App(): ReactElement {
       }
 
       // Leave list navigation alone while an overlay or menu is in front.
-      if (detail || dialog || deleteTagName || contextMenu || settingsOpen) return;
+      if (detail || dialog || deleteTagName || contextMenu || skillsOpen || settingsOpen) return;
 
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
@@ -480,7 +516,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayedResults, selectedKey, detail, dialog, deleteTagName, contextMenu, settingsOpen, actionStatus, t]);
+  }, [displayedResults, selectedKey, detail, dialog, deleteTagName, contextMenu, skillsOpen, settingsOpen, actionStatus, t]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -488,9 +524,9 @@ export function App(): ReactElement {
   }, [selectedKey]);
 
   useEffect(() => {
-    document.body.classList.toggle("overlay-open", Boolean(detail));
+    document.body.classList.toggle("overlay-open", Boolean(detail || skillsOpen));
     return () => document.body.classList.remove("overlay-open");
-  }, [detail]);
+  }, [detail, skillsOpen]);
 
   const visibleSourceFilters = useMemo(() => {
     if (!appSettings) return sourceFilters(null);
@@ -622,6 +658,19 @@ export function App(): ReactElement {
       window.setTimeout(() => {
         setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
       }, 1800);
+    } catch (error) {
+      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  async function runUtilityAction(label: string, action: () => Promise<void>, successMessage: string): Promise<void> {
+    setActionStatus({ kind: "running", message: `${label}...` });
+    try {
+      await action();
+      setActionStatus({ kind: "success", message: successMessage });
+      window.setTimeout(() => {
+        setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
+      }, 1600);
     } catch (error) {
       setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     }
@@ -946,8 +995,22 @@ export function App(): ReactElement {
           </label>
           <div className="top-actions">
             <button
+              className={`icon-button toolbar-icon-button ${skillsOpen ? "active" : ""}`}
+              onClick={() => {
+                setSettingsOpen(false);
+                setSkillsOpen(true);
+              }}
+              title={t("Skills", "Skills 管理")}
+              aria-label={t("Skills", "Skills 管理")}
+            >
+              <PackageSearch size={15} />
+            </button>
+            <button
               className="icon-button toolbar-icon-button"
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => {
+                setSkillsOpen(false);
+                setSettingsOpen(true);
+              }}
               title={t("Settings", "设置")}
               aria-label={t("Settings", "设置")}
             >
@@ -1130,8 +1193,208 @@ export function App(): ReactElement {
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}
+
+      {skillsOpen ? (
+        <SkillsDialog
+          snapshot={installedSkills}
+          loading={skillsLoading}
+          feedback={skillsFeedback}
+          language={language}
+          revealLabel={FILE_MANAGER_LABEL}
+          onRefresh={() => void loadSkills()}
+          onCopyPath={(skillPath) =>
+            void runUtilityAction(t("Copying skill path", "正在复制 Skill 路径"), () => window.sessionSearch.copySkillPath(skillPath), t("Skill path copied.", "Skill 路径已复制。"))
+          }
+          onReveal={(skillPath) =>
+            void runUtilityAction(`Opening ${FILE_MANAGER_LABEL}`, () => window.sessionSearch.revealSkill(skillPath), `${FILE_MANAGER_LABEL} opened.`)
+          }
+          onClose={() => setSkillsOpen(false)}
+        />
+      ) : null}
     </main>
   );
+}
+
+function SkillsDialog({
+  snapshot,
+  loading,
+  feedback,
+  language,
+  revealLabel,
+  onRefresh,
+  onCopyPath,
+  onReveal,
+  onClose,
+}: {
+  snapshot: InstalledSkillsSnapshot;
+  loading: boolean;
+  feedback: SkillsFeedback;
+  language: LanguageMode;
+  revealLabel: string;
+  onRefresh: () => void;
+  onCopyPath: (skillPath: string) => void;
+  onReveal: (skillPath: string) => void;
+  onClose: () => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  const [query, setQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const filteredSkills = useMemo(
+    () => filterInstalledSkills(snapshot.skills, query, sourceFilter),
+    [snapshot.skills, query, sourceFilter],
+  );
+  const selectedSkill =
+    filteredSkills.find((skill) => skill.id === selectedSkillId) ??
+    filteredSkills[0] ??
+    null;
+  const codexCount = snapshot.skills.filter((skill) => skill.agent === "codex").length;
+  const claudeCount = snapshot.skills.filter((skill) => skill.agent === "claude").length;
+
+  useEffect(() => {
+    if (!filteredSkills.length) {
+      if (selectedSkillId) setSelectedSkillId(null);
+      return;
+    }
+    if (!selectedSkillId || !filteredSkills.some((skill) => skill.id === selectedSkillId)) setSelectedSkillId(filteredSkills[0].id);
+  }, [filteredSkills, selectedSkillId]);
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={onClose}>
+      <section className="command-dialog skills-dialog" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="dialog-title">
+          <span>{l("Skills", "Skills 管理")}</span>
+          <span className="skills-dialog-count">
+            Codex {formatCompactNumber(codexCount)} · Claude Code {formatCompactNumber(claudeCount)}
+          </span>
+          <button type="button" className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="skills-toolbar">
+          <label className="skills-search">
+            <Search size={14} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={l("Search name, description, or path", "搜索名称、描述或路径")} autoFocus />
+          </label>
+          <div className="skills-filter" role="group" aria-label={l("Skill source filter", "Skill 来源筛选")}>
+            {SKILL_SOURCE_FILTERS.map((filter) => (
+              <button key={filter} className={sourceFilter === filter ? "active" : ""} onClick={() => setSourceFilter(filter)}>
+                {skillFilterLabel(filter, language)}
+              </button>
+            ))}
+          </div>
+          <button className="stats-refresh" onClick={onRefresh} disabled={loading} title={l("Refresh skills", "刷新 Skills")} aria-label={l("Refresh skills", "刷新 Skills")}>
+            <RefreshCw size={13} />
+          </button>
+        </div>
+
+        <div className="skills-roots">
+          {snapshot.roots.map((root) => (
+            <span key={`${root.source}:${root.path}`} className={root.exists ? "" : "missing"} title={root.path}>
+              <strong>{skillSourceUiLabel(root.source, language)}</strong>
+              {root.exists ? l(`${root.skillCount} skills`, `${root.skillCount} 个`) : l("Missing", "未找到")}
+            </span>
+          ))}
+        </div>
+
+        {feedback ? <div className={`skills-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
+        <div className="skills-shell">
+          <div className="skills-list">
+            {loading ? <div className="skills-empty">{l("Loading installed skills...", "正在加载已安装 Skills...")}</div> : null}
+            {!loading && filteredSkills.length === 0 ? <div className="skills-empty">{l("No skills found.", "没有找到 Skill。")}</div> : null}
+            {!loading
+              ? filteredSkills.map((skill) => (
+                  <button
+                    key={skill.id}
+                    type="button"
+                    className={`skill-item ${selectedSkill?.id === skill.id ? "active" : ""}`}
+                    onClick={() => setSelectedSkillId(skill.id)}
+                  >
+                    <span className="skill-item-head">
+                      <strong>{skill.name}</strong>
+                      <SkillSourceBadge source={skill.source} language={language} />
+                    </span>
+                    <span className="skill-item-desc">{skill.description || l("No description", "无描述")}</span>
+                    <span className="skill-item-path">{skill.path}</span>
+                  </button>
+                ))
+              : null}
+          </div>
+
+          <div className="skill-preview">
+            {selectedSkill ? (
+              <>
+                <div className="skill-preview-head">
+                  <div>
+                    <div className="skill-preview-title">
+                      <h3>{selectedSkill.name}</h3>
+                      <SkillSourceBadge source={selectedSkill.source} language={language} />
+                    </div>
+                    <p>{selectedSkill.description || l("No description", "无描述")}</p>
+                  </div>
+                  <div className="skill-preview-actions">
+                    <button onClick={() => onCopyPath(selectedSkill.path)}>
+                      <Copy size={14} />
+                      {l("Copy Path", "复制路径")}
+                    </button>
+                    <button onClick={() => onReveal(selectedSkill.path)}>
+                      <FolderOpen size={14} />
+                      {revealLabel}
+                    </button>
+                  </div>
+                </div>
+                <dl className="skill-meta">
+                  <div>
+                    <dt>{l("Agent", "Agent")}</dt>
+                    <dd>{selectedSkill.agent === "codex" ? "Codex" : "Claude Code"}</dd>
+                  </div>
+                  <div>
+                    <dt>{l("Updated", "更新时间")}</dt>
+                    <dd>{new Date(selectedSkill.mtimeMs).toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt>{l("Path", "路径")}</dt>
+                    <dd title={selectedSkill.path}>{selectedSkill.path}</dd>
+                  </div>
+                </dl>
+                <pre className="skill-markdown-preview">{skillPreviewMarkdown(selectedSkill.markdown, language)}</pre>
+              </>
+            ) : (
+              <div className="skills-empty">{l("Select a skill to preview it.", "选择一个 Skill 查看内容。")}</div>
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const SKILL_SOURCE_FILTERS: SkillSourceFilter[] = ["all", "codex", "claude", "shared", "project"];
+
+function skillFilterLabel(filter: SkillSourceFilter, language: LanguageMode): string {
+  if (filter === "codex") return "Codex";
+  if (filter === "claude") return "Claude Code";
+  if (filter === "shared") return localize(language, "Shared", "共享");
+  if (filter === "project") return localize(language, "Project", "项目");
+  return localize(language, "All", "全部");
+}
+
+function skillSourceUiLabel(source: SkillSource, language: LanguageMode): string {
+  if (source === "codex-shared") return localize(language, "Shared", "共享");
+  if (source === "codex-system") return localize(language, "Codex System", "Codex 系统");
+  if (source === "claude-project") return localize(language, "Project", "项目");
+  return skillSourceLabel(source);
+}
+
+function SkillSourceBadge({ source, language }: { source: SkillSource; language: LanguageMode }): ReactElement {
+  return <span className={`skill-source-badge ${source}`}>{skillSourceUiLabel(source, language)}</span>;
+}
+
+function skillPreviewMarkdown(markdown: string, language: LanguageMode): string {
+  const limit = 12000;
+  if (markdown.length <= limit) return markdown;
+  return `${markdown.slice(0, limit)}\n\n${localize(language, "...(truncated)", "...（已截断）")}`;
 }
 
 function QuotaPanel({
