@@ -23,4 +23,28 @@ describe("stylesheet theme contract", () => {
       expect(scroller).toMatch(/scrollbar-gutter:\s*stable/);
     }
   });
+
+  it("keeps the settings dialog within the viewport while allowing pane content to scroll", () => {
+    const settingsDialog = stylesheet.match(/\.settings-dialog\s*\{[^}]*\}/)?.[0] ?? "";
+    const settingsShell = stylesheet.match(/\.settings-shell\s*\{[^}]*\}/)?.[0] ?? "";
+    const settingsContent = stylesheet.match(/\.settings-content\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(settingsDialog).toMatch(/height:\s*min\([^;]*100vh/);
+    expect(settingsShell).toMatch(/min-height:\s*0/);
+    expect(settingsContent).toMatch(/overflow-y:\s*auto/);
+  });
+
+  it("keeps the API config dialog viewport-bound with a clear provider switch", () => {
+    const apiDialog = stylesheet.match(/\.api-config-dialog\s*\{[^}]*\}/)?.[0] ?? "";
+    const apiBody = stylesheet.match(/\.api-config-body\s*\{[^}]*\}/)?.[0] ?? "";
+    const providerSwitch = stylesheet.match(/\.api-provider-switch\s*\{[^}]*\}/)?.[0] ?? "";
+    const apiField = stylesheet.match(/\.api-settings-form\s+\.settings-field\s*\{[^}]*\}/)?.[0] ?? "";
+    const apiInput = stylesheet.match(/\.api-settings-form\s+\.settings-field\s+(?:input|select)[^{]*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(apiDialog).toMatch(/height:\s*min\([^;]*100vh/);
+    expect(apiBody).toMatch(/overflow-y:\s*auto/);
+    expect(providerSwitch).toMatch(/grid-template-columns:\s*repeat\(auto-fit/);
+    expect(apiField).toMatch(/display:\s*grid/);
+    expect(apiInput).toMatch(/width:\s*100%/);
+  });
 });

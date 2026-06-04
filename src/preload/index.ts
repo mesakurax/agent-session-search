@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AppSettings } from "../core/platform";
+import type { ApiConfig, ClaudeApiConfig } from "../core/api-config";
+import type { ApplyClaudeProfileResult } from "../core/claude-profile";
+import type { ApplyCodexProfileResult } from "../core/codex-profile";
+import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import type { IndexStatus } from "../core/indexer";
 import type { ResumeRouteResult } from "../core/resume-router";
 import type { InstalledSkillsSnapshot } from "../core/skill-manager";
@@ -35,7 +38,9 @@ const api = {
   refreshIndex: (): Promise<IndexStatus> => ipcRenderer.invoke("index:refresh"),
   getIndexStatus: (): Promise<IndexStatus> => ipcRenderer.invoke("index:status"),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
-  setSettings: (settings: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
+  setSettings: (settings: AppSettingsUpdate): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
+  applyCodexProfile: (apiConfig: ApiConfig): Promise<ApplyCodexProfileResult> => ipcRenderer.invoke("codex-profile:apply", apiConfig),
+  applyClaudeProfile: (apiConfig: ClaudeApiConfig): Promise<ApplyClaudeProfileResult> => ipcRenderer.invoke("claude-profile:apply", apiConfig),
   listSkills: (): Promise<InstalledSkillsSnapshot> => ipcRenderer.invoke("skills:list"),
   copySkillPath: (skillPath: string): Promise<void> => ipcRenderer.invoke("skills:copy-path", skillPath),
   revealSkill: (skillPath: string): Promise<void> => ipcRenderer.invoke("skills:reveal", skillPath),

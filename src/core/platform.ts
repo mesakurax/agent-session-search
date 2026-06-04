@@ -1,6 +1,14 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { DEFAULT_GLOBAL_SHORTCUT, type GlobalShortcut } from "./shortcuts";
+import {
+  defaultApiConfig,
+  defaultClaudeApiConfig,
+  normalizeApiConfig,
+  normalizeClaudeApiConfig,
+  type ApiConfig,
+  type ClaudeApiConfig,
+} from "./api-config";
+import { DEFAULT_GLOBAL_SHORTCUT, normalizeGlobalShortcut, type GlobalShortcut } from "./shortcuts";
 import {
   type TerminalChoice,
   defaultTerminalFor,
@@ -10,6 +18,17 @@ import {
 import type { SessionSearchResult, SessionSource } from "./types";
 
 export { type TerminalChoice, defaultTerminalFor, normalizeTerminal, terminalOptionsFor } from "./terminal-options";
+export {
+  defaultApiConfig,
+  defaultClaudeApiConfig,
+  normalizeApiConfig,
+  normalizeClaudeApiConfig,
+  type ApiConfig,
+  type ApiFormat,
+  type ApiProviderChoice,
+  type ClaudeApiConfig,
+  type ClaudeApiFormat,
+} from "./api-config";
 
 type ProcessRunner = (command: string, args: string[]) => Promise<void>;
 
@@ -31,7 +50,14 @@ export interface AppSettings {
   includeCodeBuddyCli: boolean;
   hideCodexQuota: boolean;
   hideClaudeQuota: boolean;
+  apiConfig: ApiConfig;
+  claudeApiConfig: ClaudeApiConfig;
 }
+
+export type AppSettingsUpdate = Partial<Omit<AppSettings, "apiConfig" | "claudeApiConfig">> & {
+  apiConfig?: Partial<ApiConfig>;
+  claudeApiConfig?: Partial<ClaudeApiConfig>;
+};
 
 export const defaultSettings: AppSettings = {
   defaultTerminal: defaultTerminalFor(),
@@ -44,7 +70,20 @@ export const defaultSettings: AppSettings = {
   includeCodeBuddyCli: false,
   hideCodexQuota: false,
   hideClaudeQuota: false,
+  apiConfig: defaultApiConfig,
+  claudeApiConfig: defaultClaudeApiConfig,
 };
+
+export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpdate): AppSettings {
+  const merged = { ...previous, ...updates };
+  return {
+    ...merged,
+    defaultTerminal: normalizeTerminal(merged.defaultTerminal),
+    globalShortcut: normalizeGlobalShortcut(merged.globalShortcut),
+    apiConfig: normalizeApiConfig({ ...previous.apiConfig, ...(updates.apiConfig ?? {}) }),
+    claudeApiConfig: normalizeClaudeApiConfig({ ...previous.claudeApiConfig, ...(updates.claudeApiConfig ?? {}) }),
+  };
+}
 
 const ITERM_APPLICATION_NAMES = ["iTerm", "iTerm2"];
 

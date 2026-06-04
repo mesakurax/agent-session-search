@@ -16,6 +16,7 @@ import {
   FolderOpen,
   Gauge,
   GitBranch,
+  KeyRound,
   Keyboard,
   Languages,
   Moon,
@@ -33,9 +34,19 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import {
+  API_PROVIDER_PRESETS,
+  CLAUDE_API_PROVIDER_PRESETS,
+  defaultApiConfig,
+  defaultClaudeApiConfig,
+  type ApiConfig,
+  type ApiProviderPresetId,
+  type ClaudeApiConfig,
+  type ClaudeApiProviderPresetId,
+} from "../../core/api-config";
 import type { IndexStatus } from "../../core/indexer";
 import { formatMessageTime, formatRelativeTime } from "../../core/format-session";
-import type { AppSettings } from "../../core/platform";
+import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { ResumeRouteResult } from "../../core/resume-router";
 import type { InstalledSkill, InstalledSkillsSnapshot, SkillSource } from "../../core/skill-manager";
 import { globalShortcutOptions } from "../../core/shortcuts";
@@ -273,6 +284,7 @@ export function App(): ReactElement {
   const [refreshFeedback, setRefreshFeedback] = useState<RefreshFeedback>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [apiConfigOpen, setApiConfigOpen] = useState(false);
   const [installedSkills, setInstalledSkills] = useState<InstalledSkillsSnapshot>(EMPTY_SKILLS);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillsFeedback, setSkillsFeedback] = useState<SkillsFeedback>(null);
@@ -428,6 +440,7 @@ export function App(): ReactElement {
     const offFocus = window.sessionSearch.onFocusSearch(() => searchRef.current?.focus());
     const offOpenSettings = window.sessionSearch.onOpenSettings(() => {
       setSkillsOpen(false);
+      setApiConfigOpen(false);
       setSettingsOpen(true);
     });
     return () => {
@@ -457,6 +470,7 @@ export function App(): ReactElement {
         event.preventDefault();
         setContextMenu(null);
         setSkillsOpen(false);
+        setApiConfigOpen(false);
         setSettingsOpen(true);
         return;
       }
@@ -474,6 +488,7 @@ export function App(): ReactElement {
         else if (deleteTagName) setDeleteTagName(null);
         else if (contextMenu) setContextMenu(null);
         else if (skillsOpen) setSkillsOpen(false);
+        else if (apiConfigOpen) setApiConfigOpen(false);
         else if (settingsOpen) setSettingsOpen(false);
         else if (detail) closeDetail();
         else return;
@@ -482,7 +497,7 @@ export function App(): ReactElement {
       }
 
       // Leave list navigation alone while an overlay or menu is in front.
-      if (detail || dialog || deleteTagName || contextMenu || skillsOpen || settingsOpen) return;
+      if (detail || dialog || deleteTagName || contextMenu || skillsOpen || apiConfigOpen || settingsOpen) return;
 
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
@@ -522,7 +537,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayedResults, selectedKey, detail, dialog, deleteTagName, contextMenu, skillsOpen, settingsOpen, actionStatus, t]);
+  }, [displayedResults, selectedKey, detail, dialog, deleteTagName, contextMenu, skillsOpen, apiConfigOpen, settingsOpen, actionStatus, t]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -530,9 +545,9 @@ export function App(): ReactElement {
   }, [selectedKey]);
 
   useEffect(() => {
-    document.body.classList.toggle("overlay-open", Boolean(detail || skillsOpen));
+    document.body.classList.toggle("overlay-open", Boolean(detail || skillsOpen || apiConfigOpen));
     return () => document.body.classList.remove("overlay-open");
-  }, [detail, skillsOpen]);
+  }, [detail, skillsOpen, apiConfigOpen]);
 
   const visibleSourceFilters = useMemo(() => {
     if (!appSettings) return sourceFilters(null);
@@ -731,7 +746,7 @@ export function App(): ReactElement {
     await updateSettings({ globalShortcut });
   }
 
-  async function updateSettings(next: Partial<AppSettings>): Promise<void> {
+  async function updateSettings(next: AppSettingsUpdate): Promise<void> {
     const enablingClaude = next.includeClaudeInternal === true && !appSettings?.includeClaudeInternal;
     const enablingCodex = next.includeCodexInternal === true && !appSettings?.includeCodexInternal;
     const enablingCodeBuddy = next.includeCodeBuddyCli === true && !appSettings?.includeCodeBuddyCli;
@@ -779,6 +794,41 @@ export function App(): ReactElement {
       window.setTimeout(() => {
         setSettingsFeedback((current) => (current?.kind === "success" ? null : current));
       }, 1600);
+    } catch (error) {
+      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  async function applyApiConfigToCodex(apiConfig: ApiConfig): Promise<void> {
+    setSettingsFeedback({ kind: "running", message: t("Applying Codex profile...", "正在应用 Codex 配置...") });
+    try {
+      const nextSettings = await window.sessionSearch.setSettings({ apiConfig });
+      setAppSettings(nextSettings);
+      const result = await window.sessionSearch.applyCodexProfile(apiConfig);
+      const profileLabel = result.profile === "codex" ? "Codex Official" : apiConfig.customProviderName.trim() || "CodexZH";
+      const successMessage = t(`Applied ${profileLabel} to ~/.codex.`, `已将 ${profileLabel} 应用到 ~/.codex。`);
+      setSettingsFeedback({ kind: "success", message: successMessage });
+      window.setTimeout(() => {
+        setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
+      }, 2200);
+    } catch (error) {
+      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  async function applyApiConfigToClaude(claudeApiConfig: ClaudeApiConfig): Promise<void> {
+    setSettingsFeedback({ kind: "running", message: t("Applying Claude Code profile...", "正在应用 Claude Code 配置...") });
+    try {
+      const nextSettings = await window.sessionSearch.setSettings({ claudeApiConfig });
+      setAppSettings(nextSettings);
+      const result = await window.sessionSearch.applyClaudeProfile(claudeApiConfig);
+      const profileLabel =
+        result.profile === "claude-official" ? "Claude Official" : claudeApiConfig.customProviderName.trim() || "Claude Code";
+      const successMessage = t(`Applied ${profileLabel} to ~/.claude.`, `已将 ${profileLabel} 应用到 ~/.claude。`);
+      setSettingsFeedback({ kind: "success", message: successMessage });
+      window.setTimeout(() => {
+        setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
+      }, 2200);
     } catch (error) {
       setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     }
@@ -1005,6 +1055,7 @@ export function App(): ReactElement {
               className={`icon-button toolbar-icon-button ${skillsOpen ? "active" : ""}`}
               onClick={() => {
                 setSettingsOpen(false);
+                setApiConfigOpen(false);
                 setSkillsOpen(true);
               }}
               title={t("Skills", "Skills 管理")}
@@ -1013,9 +1064,22 @@ export function App(): ReactElement {
               <PackageSearch size={15} />
             </button>
             <button
+              className={`icon-button toolbar-icon-button ${apiConfigOpen ? "active" : ""}`}
+              onClick={() => {
+                setSkillsOpen(false);
+                setSettingsOpen(false);
+                setApiConfigOpen(true);
+              }}
+              title={t("API configuration", "API 配置")}
+              aria-label={t("API configuration", "API 配置")}
+            >
+              <KeyRound size={15} />
+            </button>
+            <button
               className="icon-button toolbar-icon-button"
               onClick={() => {
                 setSkillsOpen(false);
+                setApiConfigOpen(false);
                 setSettingsOpen(true);
               }}
               title={t("Settings", "设置")}
@@ -1172,6 +1236,18 @@ export function App(): ReactElement {
           language={language}
           onConfirm={() => void deleteTagGlobally(deleteTagName)}
           onCancel={() => setDeleteTagName(null)}
+        />
+      ) : null}
+
+      {apiConfigOpen ? (
+        <ApiConfigDialog
+          settings={appSettings}
+          language={language}
+          feedback={settingsFeedback}
+          onSettingsChange={(next) => void updateSettings(next)}
+          onApplyToCodex={(apiConfig) => void applyApiConfigToCodex(apiConfig)}
+          onApplyToClaude={(claudeApiConfig) => void applyApiConfigToClaude(claudeApiConfig)}
+          onClose={() => setApiConfigOpen(false)}
         />
       ) : null}
 
@@ -1877,6 +1953,405 @@ function ContextMenu({
   );
 }
 
+function ApiConfigDialog({
+  settings,
+  language,
+  feedback,
+  onSettingsChange,
+  onApplyToCodex,
+  onApplyToClaude,
+  onClose,
+}: {
+  settings: AppSettings | null;
+  language: LanguageMode;
+  feedback: SettingsFeedback;
+  onSettingsChange: (settings: AppSettingsUpdate) => void;
+  onApplyToCodex: (apiConfig: ApiConfig) => void;
+  onApplyToClaude: (claudeApiConfig: ClaudeApiConfig) => void;
+  onClose: () => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  const saving = feedback?.kind === "running";
+  const [apiTarget, setApiTarget] = useState<"codex" | "claude">("codex");
+  const [draftApiConfig, setDraftApiConfig] = useState<ApiConfig>(() => settings?.apiConfig ?? { ...defaultApiConfig });
+  const [draftClaudeApiConfig, setDraftClaudeApiConfig] = useState<ClaudeApiConfig>(
+    () => settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig },
+  );
+  const updateDraftApiConfig = (next: Partial<ApiConfig>) => setDraftApiConfig((current) => ({ ...current, ...next }));
+  const updateDraftClaudeApiConfig = (next: Partial<ClaudeApiConfig>) => setDraftClaudeApiConfig((current) => ({ ...current, ...next }));
+  const selectedPreset = API_PROVIDER_PRESETS.find((preset) => preset.id === draftApiConfig.customProviderId) ?? API_PROVIDER_PRESETS[0];
+  const customName = selectedPreset?.label ?? (draftApiConfig.customProviderName || "CodexZH");
+  const selectedClaudePreset =
+    CLAUDE_API_PROVIDER_PRESETS.find((preset) => preset.id === draftClaudeApiConfig.customProviderId) ?? CLAUDE_API_PROVIDER_PRESETS[0];
+  const customClaudeName = selectedClaudePreset?.label ?? (draftClaudeApiConfig.customProviderName || "Claude Code");
+
+  const selectApiPreset = (presetId: ApiProviderPresetId) => {
+    const preset = API_PROVIDER_PRESETS.find((item) => item.id === presetId) ?? API_PROVIDER_PRESETS[0];
+    setDraftApiConfig((current) => ({
+      ...current,
+      activeProvider: "custom",
+      customProviderId: preset.id,
+      customProviderName: preset.providerName,
+      customBaseUrl: preset.baseUrl,
+      customModel: preset.model,
+      customApiFormat: preset.apiFormat,
+    }));
+  };
+
+  const selectClaudeApiPreset = (presetId: ClaudeApiProviderPresetId) => {
+    const preset = CLAUDE_API_PROVIDER_PRESETS.find((item) => item.id === presetId) ?? CLAUDE_API_PROVIDER_PRESETS[0];
+    setDraftClaudeApiConfig((current) => {
+      if (preset.id === "custom") {
+        return {
+          ...current,
+          activeProvider: "custom",
+          customProviderId: "custom",
+          customProviderName: current.customProviderName || preset.providerName,
+        };
+      }
+      return {
+        ...current,
+        activeProvider: "custom",
+        customProviderId: preset.id,
+        customProviderName: preset.providerName,
+        customBaseUrl: preset.baseUrl,
+        customModel: preset.model,
+        customHaikuModel: preset.haikuModel,
+        customSonnetModel: preset.sonnetModel,
+        customOpusModel: preset.opusModel,
+        customApiFormat: preset.apiFormat,
+        customApiKeyField: preset.apiKeyField,
+      };
+    });
+  };
+
+  useEffect(() => {
+    setDraftApiConfig(settings?.apiConfig ?? { ...defaultApiConfig });
+    setDraftClaudeApiConfig(settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig });
+  }, [settings?.apiConfig, settings?.claudeApiConfig]);
+
+  const saveDraft = () => {
+    if (apiTarget === "codex") onSettingsChange({ apiConfig: draftApiConfig });
+    else onSettingsChange({ claudeApiConfig: draftClaudeApiConfig });
+  };
+
+  const applyDraft = () => {
+    if (apiTarget === "codex") onApplyToCodex(draftApiConfig);
+    else onApplyToClaude(draftClaudeApiConfig);
+  };
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={onClose}>
+      <section className="command-dialog api-config-dialog" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="dialog-title">
+          <span>{l("API configuration", "API 配置")}</span>
+          <button type="button" className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="api-target-tabs" role="tablist" aria-label={l("API target", "API 目标")}>
+          <button type="button" className={apiTarget === "codex" ? "active" : ""} onClick={() => setApiTarget("codex")}>
+            Codex
+          </button>
+          <button type="button" className={apiTarget === "claude" ? "active" : ""} onClick={() => setApiTarget("claude")}>
+            Claude Code
+          </button>
+        </div>
+        <div className="api-config-body">
+          {apiTarget === "codex" ? (
+            <section className="settings-pane api-settings-form">
+            <header className="settings-pane-head">
+              <h3>{l("Codex providers", "Codex 供应商")}</h3>
+              <p>{l("Switch Codex between the official account and common OpenAI-compatible routes.", "在 Codex 官网账号和常用 OpenAI-compatible 路径之间切换。")}</p>
+            </header>
+            <div
+              className="api-provider-switch"
+              role="group"
+              aria-label={l("Codex provider", "Codex 供应商")}
+              data-provider-labels="CodexZH DeepSeek GLM LongCat Kimi MiMo"
+            >
+              <button
+                type="button"
+                className={draftApiConfig.activeProvider === "official" ? "active" : ""}
+                disabled={!settings || saving}
+                onClick={() => updateDraftApiConfig({ activeProvider: "official" })}
+              >
+                <strong>Codex Official</strong>
+                <span>{l("Use existing official Codex auth.", "使用现有 Codex 官网认证。")}</span>
+              </button>
+              {API_PROVIDER_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={draftApiConfig.activeProvider === "custom" && draftApiConfig.customProviderId === preset.id ? "active" : ""}
+                  disabled={!settings || saving}
+                  onClick={() => selectApiPreset(preset.id)}
+                >
+                  <strong>{preset.label}</strong>
+                  <span>{preset.model}</span>
+                </button>
+              ))}
+            </div>
+            {draftApiConfig.activeProvider === "official" ? (
+              <div className="api-config-note">
+                {l("Official Codex uses ~/.codex/config_codex.toml and auth_codex.json when you apply it to Codex.", "官网 Codex 会在应用时使用 ~/.codex/config_codex.toml 和 auth_codex.json。")}
+              </div>
+            ) : null}
+            {draftApiConfig.activeProvider === "custom" ? (
+              <>
+                <div className="api-config-note">
+                  {draftApiConfig.customProviderId === "codexzh"
+                    ? l("Apply copies ~/.codex/config_codexzh.toml and auth_codexzh.json, then overlays the non-empty fields below.", "应用时会复制 ~/.codex/config_codexzh.toml 和 auth_codexzh.json，再用下面非空字段覆盖。")
+                    : l(`Apply writes a generated ${customName} config to ~/.codex/config.toml and auth.json.`, `应用时会把生成的 ${customName} 配置写入 ~/.codex/config.toml 和 auth.json。`)}
+                </div>
+                <label className="settings-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">{l("Provider name", "供应商名称")}</span>
+                    <span className="settings-field-sub">{l("Display name for this custom Codex route.", "这个自定义 Codex 路径的显示名称。")}</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={draftApiConfig.customProviderName}
+                    disabled={!settings || saving}
+                    placeholder="CodexZH"
+                    onChange={(event) => updateDraftApiConfig({ customProviderName: event.currentTarget.value })}
+                  />
+                </label>
+                <label className="settings-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">Base URL</span>
+                    <span className="settings-field-sub">{l("OpenAI-compatible endpoint, usually ending in /v1.", "OpenAI-compatible 接口地址，通常以 /v1 结尾。")}</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={draftApiConfig.customBaseUrl}
+                    disabled={!settings || saving}
+                    placeholder="https://api.example.com/v1"
+                    onChange={(event) => updateDraftApiConfig({ customBaseUrl: event.currentTarget.value })}
+                  />
+                </label>
+                <label className="settings-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">API Key</span>
+                    <span className="settings-field-sub">{l("Stored locally. Applying it to Codex CLI will be a separate explicit action.", "保存在本地；写入 Codex CLI 会作为单独的显式动作。")}</span>
+                  </div>
+                  <input
+                    type="password"
+                    value={draftApiConfig.customApiKey}
+                    disabled={!settings || saving}
+                    placeholder="sk-..."
+                    onChange={(event) => updateDraftApiConfig({ customApiKey: event.currentTarget.value })}
+                  />
+                </label>
+                <label className="settings-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">{l("Model", "模型")}</span>
+                    <span className="settings-field-sub">{l("Model name for this Codex route.", "这个 Codex 路径使用的模型名称。")}</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={draftApiConfig.customModel}
+                    disabled={!settings || saving}
+                    placeholder="gpt-5.5"
+                    onChange={(event) => updateDraftApiConfig({ customModel: event.currentTarget.value })}
+                  />
+                </label>
+                <label className="settings-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">{l("API format", "API 格式")}</span>
+                    <span className="settings-field-sub">{l("Matches cc-switch's OpenAI Chat / Responses split.", "对应 cc-switch 里的 OpenAI Chat / Responses 区分。")}</span>
+                  </div>
+                  <select
+                    value={draftApiConfig.customApiFormat}
+                    disabled={!settings || saving}
+                    onChange={(event) => updateDraftApiConfig({ customApiFormat: event.currentTarget.value as ApiConfig["customApiFormat"] })}
+                  >
+                    <option value="openai_chat">OpenAI Chat Completions</option>
+                    <option value="openai_responses">OpenAI Responses API</option>
+                  </select>
+                </label>
+              </>
+            ) : null}
+            </section>
+          ) : (
+            <section className="settings-pane api-settings-form">
+              <header className="settings-pane-head">
+                <h3>{l("Claude Code providers", "Claude Code 供应商")}</h3>
+                <p>{l("Switch Claude Code between official auth and common Anthropic-compatible routes.", "在 Claude 官方认证和常用 Anthropic-compatible 路径之间切换。")}</p>
+              </header>
+              <div
+                className="api-provider-switch"
+                role="group"
+                aria-label={l("Claude Code provider", "Claude Code 供应商")}
+                data-provider-labels="Custom DeepSeek GLM LongCat Kimi MiMo"
+              >
+                <button
+                  type="button"
+                  className={draftClaudeApiConfig.activeProvider === "official" ? "active" : ""}
+                  disabled={!settings || saving}
+                  onClick={() => updateDraftClaudeApiConfig({ activeProvider: "official" })}
+                >
+                  <strong>Claude Official</strong>
+                  <span>{l("Use existing Claude Code auth.", "使用现有 Claude Code 官方认证。")}</span>
+                </button>
+                {CLAUDE_API_PROVIDER_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={draftClaudeApiConfig.activeProvider === "custom" && draftClaudeApiConfig.customProviderId === preset.id ? "active" : ""}
+                    disabled={!settings || saving}
+                    onClick={() => selectClaudeApiPreset(preset.id)}
+                  >
+                    <strong>{preset.label}</strong>
+                    <span>{preset.model || l("Manual route", "手动配置")}</span>
+                  </button>
+                ))}
+              </div>
+              {draftClaudeApiConfig.activeProvider === "official" ? (
+                <div className="api-config-note">
+                  {l("Apply clears third-party route env keys in ~/.claude/settings.json and keeps other Claude settings.", "应用时会清理 ~/.claude/settings.json 里的第三方路由 env，并保留其他 Claude 设置。")}
+                </div>
+              ) : null}
+              {draftClaudeApiConfig.activeProvider === "custom" ? (
+                <>
+                  <div className="api-config-note">
+                    {l(`Apply writes ${customClaudeName} route env into ~/.claude/settings.json.`, `应用时会把 ${customClaudeName} 路由 env 写入 ~/.claude/settings.json。`)}
+                  </div>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">{l("Provider name", "供应商名称")}</span>
+                      <span className="settings-field-sub">{l("Display name for this Claude Code route.", "这个 Claude Code 路径的显示名称。")}</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={draftClaudeApiConfig.customProviderName}
+                      disabled={!settings || saving}
+                      placeholder="Custom Claude"
+                      onChange={(event) => updateDraftClaudeApiConfig({ customProviderName: event.currentTarget.value })}
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">Base URL</span>
+                      <span className="settings-field-sub">{l("Anthropic-compatible endpoint for Claude Code.", "Claude Code 使用的 Anthropic-compatible 接口地址。")}</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={draftClaudeApiConfig.customBaseUrl}
+                      disabled={!settings || saving}
+                      placeholder="https://api.example.com/anthropic"
+                      onChange={(event) => updateDraftClaudeApiConfig({ customBaseUrl: event.currentTarget.value })}
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">API Key</span>
+                      <span className="settings-field-sub">{l("Stored locally and written to Claude Code only when applied.", "保存在本地，只在应用时写入 Claude Code。")}</span>
+                    </div>
+                    <input
+                      type="password"
+                      value={draftClaudeApiConfig.customApiKey}
+                      disabled={!settings || saving}
+                      placeholder="sk-..."
+                      onChange={(event) => updateDraftClaudeApiConfig({ customApiKey: event.currentTarget.value })}
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">{l("Model", "模型")}</span>
+                      <span className="settings-field-sub">{l("Primary Claude Code model env.", "Claude Code 的主模型 env。")}</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={draftClaudeApiConfig.customModel}
+                      disabled={!settings || saving}
+                      placeholder="claude-sonnet-4.6"
+                      onChange={(event) => updateDraftClaudeApiConfig({ customModel: event.currentTarget.value })}
+                    />
+                  </label>
+                  <div className="api-model-grid">
+                    <label className="settings-field">
+                      <div className="settings-field-text">
+                        <span className="settings-field-title">Haiku</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={draftClaudeApiConfig.customHaikuModel}
+                        disabled={!settings || saving}
+                        placeholder={draftClaudeApiConfig.customModel || "haiku model"}
+                        onChange={(event) => updateDraftClaudeApiConfig({ customHaikuModel: event.currentTarget.value })}
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <div className="settings-field-text">
+                        <span className="settings-field-title">Sonnet</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={draftClaudeApiConfig.customSonnetModel}
+                        disabled={!settings || saving}
+                        placeholder={draftClaudeApiConfig.customModel || "sonnet model"}
+                        onChange={(event) => updateDraftClaudeApiConfig({ customSonnetModel: event.currentTarget.value })}
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <div className="settings-field-text">
+                        <span className="settings-field-title">Opus</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={draftClaudeApiConfig.customOpusModel}
+                        disabled={!settings || saving}
+                        placeholder={draftClaudeApiConfig.customModel || "opus model"}
+                        onChange={(event) => updateDraftClaudeApiConfig({ customOpusModel: event.currentTarget.value })}
+                      />
+                    </label>
+                  </div>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">{l("Key env", "Key 环境变量")}</span>
+                      <span className="settings-field-sub">{l("Most Claude Code routes use ANTHROPIC_AUTH_TOKEN.", "大多数 Claude Code 路径使用 ANTHROPIC_AUTH_TOKEN。")}</span>
+                    </div>
+                    <select
+                      value={draftClaudeApiConfig.customApiKeyField}
+                      disabled={!settings || saving}
+                      onChange={(event) =>
+                        updateDraftClaudeApiConfig({ customApiKeyField: event.currentTarget.value as ClaudeApiConfig["customApiKeyField"] })
+                      }
+                    >
+                      <option value="ANTHROPIC_AUTH_TOKEN">ANTHROPIC_AUTH_TOKEN</option>
+                      <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY</option>
+                    </select>
+                  </label>
+                </>
+              ) : null}
+            </section>
+          )}
+        </div>
+        <div className="dialog-actions api-config-actions">
+          <button type="button" onClick={onClose} disabled={saving}>
+            {l("Cancel", "取消")}
+          </button>
+          <button type="button" disabled={!settings || saving} onClick={saveDraft}>
+            {l("Save", "保存")}
+          </button>
+          <button
+            type="button"
+            className="primary-action"
+            disabled={!settings || saving}
+            onClick={applyDraft}
+          >
+            {apiTarget === "codex" ? l("Apply to Codex", "应用到 Codex") : l("Apply to Claude Code", "应用到 Claude Code")}
+          </button>
+        </div>
+        <div className={`settings-feedback ${feedback?.kind ?? ""}`} aria-live="polite">
+          {feedback?.message ?? ""}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SettingsDialog({
   settings,
   theme,
@@ -1893,7 +2368,7 @@ function SettingsDialog({
   theme: ThemeMode;
   language: LanguageMode;
   feedback: SettingsFeedback;
-  onSettingsChange: (settings: Partial<AppSettings>) => void;
+  onSettingsChange: (settings: AppSettingsUpdate) => void;
   onThemeChange: (theme: ThemeMode) => void;
   onLanguageChange: (language: LanguageMode) => void;
   onDefaultTerminalChange: (terminal: AppSettings["defaultTerminal"]) => void;

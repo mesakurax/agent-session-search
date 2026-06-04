@@ -15,11 +15,20 @@ import Store from "electron-store";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  mergeApiConfigWithProfileDefaults,
+  mergeClaudeApiConfigWithProfileDefaults,
+  type ApiConfig,
+  type ClaudeApiConfig,
+} from "../core/api-config";
+import { applyClaudeApiConfig, loadClaudeApiConfigDefaults } from "../core/claude-profile";
+import { applyCodexApiConfig, loadCodexProfileDefaults } from "../core/codex-profile";
 import { syncDefaultSessionsInBatches, type IndexStatus } from "../core/indexer";
 import { formatSessionMarkdown, formatSessionPlainText } from "../core/format-session";
 import {
   defaultSettings,
   getResumeCommand,
+  mergeAppSettings,
   normalizeTerminal,
   openNativeApp,
   openResumeInSpecificTerminal,
@@ -34,7 +43,7 @@ import { SessionStore } from "../core/session-store";
 import { listInstalledSkills } from "../core/skill-manager";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
 import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts";
-import type { AppSettings } from "../core/platform";
+import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import type { SearchOptions, SessionStatsOptions } from "../core/types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,12 +65,67 @@ const settingsStore = new Store<AppSettings>({
 });
 
 function getSettings(): AppSettings {
-  const settings = { ...defaultSettings, ...settingsStore.store };
+  const settings = mergeAppSettings(defaultSettings, settingsStore.store);
   return {
     ...settings,
     globalShortcut: normalizeGlobalShortcut(settings.globalShortcut),
     defaultTerminal: normalizeTerminal(settings.defaultTerminal),
   };
+}
+
+async function getHydratedSettings(): Promise<AppSettings> {
+  const settings = getSettings();
+  const [profileDefaults, claudeProfileDefaults] = await Promise.all([
+    loadCodexProfileDefaults(),
+    loadClaudeApiConfigDefaults(),
+  ]);
+  return {
+    ...settings,
+    apiConfig: mergeApiConfigWithProfileDefaults(settings.apiConfig, getSavedApiConfigPatch(), profileDefaults),
+    claudeApiConfig: mergeClaudeApiConfigWithProfileDefaults(
+      settings.claudeApiConfig,
+      getSavedClaudeApiConfigPatch(),
+      claudeProfileDefaults,
+    ),
+  };
+}
+
+function getSavedApiConfigPatch(): Partial<ApiConfig> {
+  const saved: Partial<ApiConfig> = {};
+  const readSaved = <K extends keyof ApiConfig>(key: K): void => {
+    const pathKey = `apiConfig.${key}` as `apiConfig.${keyof ApiConfig}`;
+    if (settingsStore.has(pathKey)) saved[key] = settingsStore.get(pathKey) as ApiConfig[K];
+  };
+
+  readSaved("activeProvider");
+  readSaved("customProviderId");
+  readSaved("customProviderName");
+  readSaved("customBaseUrl");
+  readSaved("customApiKey");
+  readSaved("customModel");
+  readSaved("customApiFormat");
+  return saved;
+}
+
+function getSavedClaudeApiConfigPatch(): Partial<ClaudeApiConfig> {
+  const saved: Partial<ClaudeApiConfig> = {};
+  const readSaved = <K extends keyof ClaudeApiConfig>(key: K): void => {
+    const pathKey = `claudeApiConfig.${key}` as `claudeApiConfig.${keyof ClaudeApiConfig}`;
+    if (settingsStore.has(pathKey)) saved[key] = settingsStore.get(pathKey) as ClaudeApiConfig[K];
+  };
+
+  readSaved("activeProvider");
+  readSaved("customProviderId");
+  readSaved("customProviderName");
+  readSaved("customBaseUrl");
+  readSaved("customApiKey");
+  readSaved("customModel");
+  readSaved("customHaikuModel");
+  readSaved("customSonnetModel");
+  readSaved("customOpusModel");
+  readSaved("customApiFormat");
+  readSaved("customApiKeyField");
+  return saved;
 }
 
 function markdownExportFileName(title: string): string {
@@ -354,10 +418,12 @@ function registerIpc(): void {
   ipcMain.handle("hide:set", (_event, sessionKey: string, hidden: boolean) => store.setHidden(sessionKey, hidden));
   ipcMain.handle("index:refresh", () => runIndexSync());
   ipcMain.handle("index:status", () => indexStatus);
-  ipcMain.handle("settings:get", () => getSettings());
-  ipcMain.handle("settings:set", (_event, settings: Partial<AppSettings>) => {
+  ipcMain.handle("settings:get", () => getHydratedSettings());
+  ipcMain.handle("codex-profile:apply", (_event, apiConfig: Partial<ApiConfig>) => applyCodexApiConfig({ apiConfig }));
+  ipcMain.handle("claude-profile:apply", (_event, apiConfig: Partial<ClaudeApiConfig>) => applyClaudeApiConfig({ apiConfig }));
+  ipcMain.handle("settings:set", (_event, settings: AppSettingsUpdate) => {
     const previous = getSettings();
-    const next = { ...previous, ...settings, globalShortcut: normalizeGlobalShortcut(settings.globalShortcut ?? previous.globalShortcut) };
+    const next = mergeAppSettings(previous, settings);
     if (next.globalShortcut !== previous.globalShortcut && !registerAppGlobalShortcut(next.globalShortcut)) {
       throw new Error(
         `Shortcut ${globalShortcutLabel(next.globalShortcut)} could not be registered. It may be used by another app.`,

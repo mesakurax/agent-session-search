@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   buildWindowsLaunchPlan,
+  defaultApiConfig,
+  defaultClaudeApiConfig,
   defaultSettings,
   defaultTerminalFor,
   getResumeCommand,
   getResumeProcessSpec,
+  mergeAppSettings,
+  normalizeApiConfig,
+  normalizeClaudeApiConfig,
   normalizeTerminal,
   resolveMacApplicationName,
   terminalOptionsFor,
@@ -85,6 +90,84 @@ describe("terminal options per platform", () => {
     expect(normalizeTerminal("Terminal", "win32")).toBe("WindowsTerminal");
     expect(normalizeTerminal("Cmd", "darwin")).toBe("Terminal");
     expect(normalizeTerminal("PowerShell", "win32")).toBe("PowerShell");
+  });
+});
+
+describe("API settings", () => {
+  it("normalizes Codex API provider config fields", () => {
+    expect(
+      normalizeApiConfig({
+        activeProvider: "custom",
+        customProviderName: "  codexzh  ",
+        customBaseUrl: " https://api.example.com/v1 ",
+        customApiKey: " sk-test ",
+        customModel: " gpt-5.5 ",
+        customApiFormat: "openai_responses",
+      }),
+    ).toEqual({
+      activeProvider: "custom",
+      customProviderId: "codexzh",
+      customProviderName: "codexzh",
+      customBaseUrl: "https://api.example.com/v1",
+      customApiKey: "sk-test",
+      customModel: "gpt-5.5",
+      customApiFormat: "openai_responses",
+    });
+  });
+
+  it("deep merges API config updates without dropping saved fields", () => {
+    const previous = {
+      ...defaultSettings,
+      apiConfig: {
+        activeProvider: "custom" as const,
+        customProviderId: "codexzh" as const,
+        customProviderName: "codexzh",
+        customBaseUrl: "https://api.example.com/v1",
+        customApiKey: "sk-test",
+        customModel: "gpt-5.5",
+        customApiFormat: "openai_chat" as const,
+      },
+    };
+
+    expect(mergeAppSettings(previous, { apiConfig: { customModel: "gpt-5.5-mini" } })).toMatchObject({
+      apiConfig: {
+        ...previous.apiConfig,
+        customModel: "gpt-5.5-mini",
+      },
+    });
+  });
+
+  it("normalizes Claude Code API provider config fields", () => {
+    expect(
+      normalizeClaudeApiConfig({
+        activeProvider: "custom",
+        customProviderId: "deepseek",
+        customProviderName: "  deepseek  ",
+        customBaseUrl: " https://api.deepseek.com/anthropic ",
+        customApiKey: " sk-test ",
+        customModel: " deepseek-v4-pro ",
+        customHaikuModel: " deepseek-v4-flash ",
+        customSonnetModel: " deepseek-v4-pro ",
+        customOpusModel: " deepseek-v4-pro ",
+      }),
+    ).toEqual({
+      activeProvider: "custom",
+      customProviderId: "deepseek",
+      customProviderName: "deepseek",
+      customBaseUrl: "https://api.deepseek.com/anthropic",
+      customApiKey: "sk-test",
+      customModel: "deepseek-v4-pro",
+      customHaikuModel: "deepseek-v4-flash",
+      customSonnetModel: "deepseek-v4-pro",
+      customOpusModel: "deepseek-v4-pro",
+      customApiFormat: "anthropic",
+      customApiKeyField: "ANTHROPIC_AUTH_TOKEN",
+    });
+  });
+
+  it("defaults API config to the official Codex provider", () => {
+    expect(defaultSettings.apiConfig).toEqual(defaultApiConfig);
+    expect(defaultSettings.claudeApiConfig).toEqual(defaultClaudeApiConfig);
   });
 });
 

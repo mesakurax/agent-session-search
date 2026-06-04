@@ -48,6 +48,53 @@ describe("theme controls", () => {
     expect(settingsDialog).toMatch(/Language/);
   });
 
+  it("keeps API configuration beside Skills instead of inside settings", () => {
+    const toolbarActions = appSource.slice(appSource.indexOf('<div className="top-actions">'), appSource.indexOf("</header>"));
+    const apiDialog = appSource.slice(appSource.indexOf("function ApiConfigDialog"), appSource.indexOf("function SettingsDialog"));
+    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"), appSource.indexOf("function DeleteTagDialog"));
+
+    expect(toolbarActions).toContain("setApiConfigOpen(true)");
+    expect(toolbarActions).toContain("PackageSearch");
+    expect(toolbarActions).toContain("KeyRound");
+    expect(settingsDialog).not.toContain("api-settings-form");
+    expect(settingsDialog).not.toContain('activeSection === "api"');
+    expect(apiDialog).toContain("api-settings-form");
+    expect(apiDialog).toContain("apiConfig");
+    expect(apiDialog).toContain("claudeApiConfig");
+    expect(apiDialog).toMatch(/Codex Official/);
+    expect(apiDialog).toMatch(/Claude Official/);
+    expect(apiDialog).toMatch(/Claude Code providers/);
+    expect(apiDialog).toMatch(/Custom/);
+    expect(apiDialog).toMatch(/CodexZH/);
+    expect(apiDialog).toMatch(/DeepSeek/);
+    expect(apiDialog).toMatch(/GLM/);
+    expect(apiDialog).toMatch(/LongCat/);
+    expect(apiDialog).toMatch(/Kimi/);
+    expect(apiDialog).toMatch(/MiMo/);
+    expect(apiDialog).toMatch(/API configuration/);
+    expect(apiDialog).toMatch(/Base URL/);
+    expect(apiDialog).toMatch(/API Key/);
+    expect(apiDialog).toMatch(/Model/);
+  });
+
+  it("edits API configuration as a local draft before saving", () => {
+    const apiDialog = appSource.slice(appSource.indexOf("function ApiConfigDialog"), appSource.indexOf("function SettingsDialog"));
+
+    expect(apiDialog).toContain("draftApiConfig");
+    expect(apiDialog).toContain("setDraftApiConfig");
+    expect(apiDialog).toContain("draftClaudeApiConfig");
+    expect(apiDialog).toContain("setDraftClaudeApiConfig");
+    expect(apiDialog).toContain("selectApiPreset");
+    expect(apiDialog).toContain("selectClaudeApiPreset");
+    expect(apiDialog).toContain("onSettingsChange({ apiConfig: draftApiConfig })");
+    expect(apiDialog).toContain("onSettingsChange({ claudeApiConfig: draftClaudeApiConfig })");
+    expect(apiDialog).toContain("onApplyToCodex(draftApiConfig)");
+    expect(apiDialog).toContain("onApplyToClaude(draftClaudeApiConfig)");
+    expect(apiDialog).toMatch(/Apply to Codex/);
+    expect(apiDialog).toMatch(/Apply to Claude Code/);
+    expect(apiDialog).toMatch(/Save/);
+  });
+
   it("opens settings with the standard preferences shortcut", () => {
     expect(appSource).toContain('event.key === ","');
     expect(appSource).toContain("setSettingsOpen(true)");
