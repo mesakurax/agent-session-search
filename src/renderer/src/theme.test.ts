@@ -4,6 +4,7 @@ import { readStoredLanguage } from "./language";
 import { readStoredTheme } from "./theme";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+const apiConfigDialogSource = readFileSync(new URL("./components/api-config-dialog.tsx", import.meta.url), "utf8");
 
 describe("theme storage", () => {
   it("defaults to light when no theme is stored", () => {
@@ -32,7 +33,7 @@ describe("theme controls", () => {
       appSource.indexOf('<header className="toolbar">'),
       appSource.indexOf('<div className="result-count">'),
     );
-    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"), appSource.indexOf("function DeleteTagDialog"));
+    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"));
 
     expect(toolbar).not.toContain("setTheme");
     expect(settingsDialog).toContain("theme-setting-toggle");
@@ -41,7 +42,7 @@ describe("theme controls", () => {
   });
 
   it("keeps language selection inside settings", () => {
-    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"), appSource.indexOf("function DeleteTagDialog"));
+    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"));
 
     expect(settingsDialog).toContain("language-setting-toggle");
     expect(settingsDialog).toContain("onLanguageChange");
@@ -50,8 +51,8 @@ describe("theme controls", () => {
 
   it("keeps API configuration beside Skills instead of inside settings", () => {
     const toolbarActions = appSource.slice(appSource.indexOf('<div className="top-actions">'), appSource.indexOf("</header>"));
-    const apiDialog = appSource.slice(appSource.indexOf("function ApiConfigDialog"), appSource.indexOf("function SettingsDialog"));
-    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"), appSource.indexOf("function DeleteTagDialog"));
+    const apiDialog = apiConfigDialogSource;
+    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"));
 
     expect(toolbarActions).toContain("setApiConfigOpen(true)");
     expect(toolbarActions).toContain("PackageSearch");
@@ -78,7 +79,7 @@ describe("theme controls", () => {
   });
 
   it("edits API configuration as a local draft before saving", () => {
-    const apiDialog = appSource.slice(appSource.indexOf("function ApiConfigDialog"), appSource.indexOf("function SettingsDialog"));
+    const apiDialog = apiConfigDialogSource;
 
     expect(apiDialog).toContain("draftApiConfig");
     expect(apiDialog).toContain("setDraftApiConfig");
@@ -96,7 +97,7 @@ describe("theme controls", () => {
   });
 
   it("lets API keys be revealed without changing the saved value", () => {
-    const apiDialog = appSource.slice(appSource.indexOf("function ApiConfigDialog"), appSource.indexOf("function SettingsDialog"));
+    const apiDialog = apiConfigDialogSource;
 
     expect(apiDialog).toContain("showCodexApiKey");
     expect(apiDialog).toContain("showClaudeApiKey");
@@ -107,9 +108,10 @@ describe("theme controls", () => {
   });
 
   it("loads saved API keys when switching provider presets", () => {
-    const apiDialog = appSource.slice(appSource.indexOf("function ApiConfigDialog"), appSource.indexOf("function SettingsDialog"));
+    const apiDialog = apiConfigDialogSource;
     const selectApiPreset = apiDialog.slice(apiDialog.indexOf("const selectApiPreset"), apiDialog.indexOf("const selectClaudeApiPreset"));
-    const selectClaudeApiPreset = apiDialog.slice(apiDialog.indexOf("const selectClaudeApiPreset"), apiDialog.indexOf("useEffect"));
+    const selectClaudeApiPresetStart = apiDialog.indexOf("const selectClaudeApiPreset");
+    const selectClaudeApiPreset = apiDialog.slice(selectClaudeApiPresetStart, apiDialog.indexOf("  useEffect", selectClaudeApiPresetStart));
 
     expect(selectApiPreset).toContain('getApiProviderKey("codex", preset.id)');
     expect(selectApiPreset).toContain("customApiKey: apiKey");

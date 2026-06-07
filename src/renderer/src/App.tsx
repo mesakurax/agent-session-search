@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEventHandler, ReactElement } from "react";
+import type { CSSProperties, MouseEventHandler, ReactElement } from "react";
 import {
   AppWindow,
   Archive,
@@ -34,21 +34,11 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import {
-  API_PROVIDER_PRESETS,
-  CLAUDE_API_PROVIDER_PRESETS,
-  defaultApiConfig,
-  defaultClaudeApiConfig,
-  type ApiConfig,
-  type ApiProviderPresetId,
-  type ClaudeApiConfig,
-  type ClaudeApiProviderPresetId,
-} from "../../core/api-config";
+import type { ApiConfig, ClaudeApiConfig } from "../../core/api-config";
 import type { IndexStatus } from "../../core/indexer";
-import { formatMessageTime, formatRelativeTime } from "../../core/format-session";
+import { formatRelativeTime } from "../../core/format-session";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
-import type { ResumeRouteResult } from "../../core/resume-router";
-import type { InstalledSkill, InstalledSkillsSnapshot, SkillSource } from "../../core/skill-manager";
+import type { InstalledSkill, InstalledSkillsSnapshot } from "../../core/skill-manager";
 import { globalShortcutOptions } from "../../core/shortcuts";
 import { terminalSelectOptions } from "../../core/terminal-options";
 import type {
@@ -58,7 +48,6 @@ import type {
   SessionMessage,
   SessionSearchResult,
   SessionSortBy,
-  SessionSource,
   SessionStats,
   SessionStatsPeriod,
   SessionTraceEvent,
@@ -69,7 +58,6 @@ import { formatCompactNumber, formatTokenCount } from "./format-count";
 import {
   filterSessionsByLiveStatus,
   getLiveSessionState,
-  liveStateLabel,
   type LiveSessionState,
   type LiveStatusFilter,
 } from "./live-filter";
@@ -81,37 +69,32 @@ import {
   type SidebarSectionsState,
 } from "./sidebar-sections";
 import { LANGUAGE_STORAGE_KEY, localize, readInitialLanguage, type LanguageMode } from "./language";
-import { filterInstalledSkills, sortInstalledSkills, skillSourceLabel, type SkillSortKey, type SkillSourceFilter } from "./skill-manager";
 import { readInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from "./theme";
-
-const SOURCE_LABEL: Record<SessionSource, string> = {
-  "claude-cli": "Claude Code",
-  "claude-app": "Claude App",
-  "claude-internal": "Claude Extra",
-  "codex-cli": "Codex CLI",
-  "codex-app": "Codex App",
-  "codex-internal": "Codex Extra",
-  "codebuddy-cli": "CodeBuddy CLI",
-};
-
-const BASE_SOURCE_FILTERS: Array<{ label: string; value: SearchOptions["source"] }> = [
-  { label: "All", value: "all" },
-  { label: "Claude", value: "claude" },
-  { label: "Codex", value: "codex" },
-  { label: "Claude Code", value: "claude-cli" },
-  { label: "Claude App", value: "claude-app" },
-  { label: "Codex CLI", value: "codex-cli" },
-  { label: "Codex App", value: "codex-app" },
-];
-
-function sourceFilters(settings: AppSettings | null): Array<{ label: string; value: SearchOptions["source"] }> {
-  return [
-    ...BASE_SOURCE_FILTERS,
-    ...(settings?.includeClaudeInternal ? [{ label: "Claude Extra", value: "claude-internal" as const }] : []),
-    ...(settings?.includeCodexInternal ? [{ label: "Codex Extra", value: "codex-internal" as const }] : []),
-    ...(settings?.includeCodeBuddyCli ? [{ label: "CodeBuddy CLI", value: "codebuddy-cli" as const }] : []),
-  ];
-}
+import type {
+  ActionStatus,
+  ContextMenuState,
+  DialogState,
+  QuotaFeedback,
+  RefreshFeedback,
+  SettingsFeedback,
+  SkillsFeedback,
+  StatsFeedback,
+} from "./app-types";
+import { ApiConfigDialog } from "./components/api-config-dialog";
+import { DetailPanel } from "./components/detail-panel";
+import { CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
+import { SkillsDialog } from "./components/skills-dialog";
+import {
+  SOURCE_LABEL,
+  isBranchTag,
+  liveStatusFilterLabel,
+  localizedLiveStateLabel,
+  resumeRouteMessage,
+  sourceFilterLabel,
+  sourceFilters,
+  sourceUiFamily,
+  statsPeriodLabel,
+} from "./session-ui";
 
 const SORT_OPTIONS: Array<{ label: string; value: SessionSortBy }> = [
   { label: "Latest activity", value: "activity" },
@@ -178,73 +161,11 @@ const EMPTY_SKILLS: InstalledSkillsSnapshot = {
   scannedAt: 0,
 };
 
-function isBranchTag(tagName: string): boolean {
-  return tagName.startsWith("branch:");
-}
-
-function sourceUiFamily(source: SessionSource): "claude" | "codex" | "codebuddy" {
-  if (source.startsWith("claude")) return "claude";
-  if (source.startsWith("codex")) return "codex";
-  return "codebuddy";
-}
-
 function sortLabel(value: SessionSortBy, language: LanguageMode): string {
   if (value === "created") return localize(language, "Created", "创建时间");
   if (value === "updated") return localize(language, "Updated", "更新时间");
   return localize(language, "Latest activity", "最近活动");
 }
-
-function statsPeriodLabel(value: SessionStatsPeriod, language: LanguageMode): string {
-  if (value === "today") return localize(language, "Today", "今天");
-  if (value === "sevenDay") return localize(language, "7D", "7 天");
-  if (value === "thirtyDay") return localize(language, "30D", "30 天");
-  return localize(language, "All", "全部");
-}
-
-function liveStatusFilterLabel(value: LiveStatusFilter, language: LanguageMode): string {
-  if (value === "open") return localize(language, "Open", "打开");
-  if (value === "closed") return localize(language, "Closed", "关闭");
-  return localize(language, "All", "全部");
-}
-
-function sourceFilterLabel(item: { label: string; value: SearchOptions["source"] }, language: LanguageMode): string {
-  return item.value === "all" ? localize(language, "All", "全部") : item.label;
-}
-
-function localizedLiveStateLabel(state: LiveSessionState, language: LanguageMode): string {
-  return localize(language, liveStateLabel(state), state === "open" ? "打开" : state === "closed" ? "关闭" : "未知");
-}
-
-function resumeRouteMessage(result: ResumeRouteResult, language: LanguageMode): string {
-  return result.route === "focus"
-    ? localize(language, "Terminal brought to front.", "终端已前置。")
-    : localize(language, "Resume command sent to terminal.", "Resume 命令已发送到终端。");
-}
-
-type ActionStatus = {
-  kind: "running" | "success" | "error";
-  message: string;
-};
-
-type RefreshFeedback = ActionStatus | null;
-type StatsFeedback = ActionStatus | null;
-type QuotaFeedback = ActionStatus | null;
-type SettingsFeedback = ActionStatus | null;
-type SkillsFeedback = ActionStatus | null;
-
-interface ContextMenuState {
-  x: number;
-  y: number;
-  session: SessionSearchResult;
-}
-
-type DialogState =
-  | {
-      kind: "rename" | "tag";
-      session: SessionSearchResult;
-      value: string;
-    }
-  | null;
 
 const SIDEBAR_SECTIONS_STORAGE_KEY = "agent-session-search-sidebar-sections";
 
@@ -281,6 +202,7 @@ export function App(): ReactElement {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionSearchResult | null>(null);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
+  const [messageOffset, setMessageOffset] = useState(0);
   const [traceEvents, setTraceEvents] = useState<SessionTraceEvent[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -660,40 +582,67 @@ export function App(): ReactElement {
     setContextMenu(null);
     setDetail(session);
     setMessages([]);
+    setMessageOffset(0);
     setTraceEvents([]);
     setMessagesLoading(true);
 
     const sessionKey = session.sessionKey;
-    const [fresh, loadedMessages, loadedTraceEvents] = await Promise.all([
-      window.sessionSearch.getSession(sessionKey),
-      window.sessionSearch.getMessages(sessionKey, 0, INITIAL_MESSAGE_LIMIT),
-      window.sessionSearch.getTraceEvents(sessionKey),
-    ]);
-    if (requestId !== detailLoadSeqRef.current) return;
-    if (!fresh) {
+    try {
+      const [fresh, loadedTraceEvents] = await Promise.all([
+        window.sessionSearch.getSession(sessionKey),
+        window.sessionSearch.getTraceEvents(sessionKey),
+      ]);
+      if (requestId !== detailLoadSeqRef.current) return;
+      if (!fresh) {
+        setMessagesLoading(false);
+        return;
+      }
+
+      const initialOffset = Math.max(0, fresh.messageCount - INITIAL_MESSAGE_LIMIT);
+      const loadedMessages = await window.sessionSearch.getMessages(sessionKey, initialOffset, INITIAL_MESSAGE_LIMIT);
+      if (requestId !== detailLoadSeqRef.current) return;
+
+      setDetail(fresh);
+      setMessageOffset(initialOffset);
+      setMessages(loadedMessages);
+      setTraceEvents(loadedTraceEvents);
       setMessagesLoading(false);
-      return;
+    } catch (error) {
+      if (requestId === detailLoadSeqRef.current) {
+        setMessagesLoading(false);
+        setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      }
     }
-    setDetail(fresh);
-    setMessages(loadedMessages);
-    setTraceEvents(loadedTraceEvents);
-    setMessagesLoading(false);
   }
 
   function closeDetail(): void {
     detailLoadSeqRef.current++;
     setDetail(null);
     setMessages([]);
+    setMessageOffset(0);
     setTraceEvents([]);
     setMessagesLoading(false);
   }
 
   async function loadMoreMessages(): Promise<void> {
-    if (!detail || messagesLoading) return;
+    if (!detail || messagesLoading || messageOffset <= 0) return;
+    const requestId = detailLoadSeqRef.current;
+    const sessionKey = detail.sessionKey;
+    const nextOffset = Math.max(0, messageOffset - MESSAGE_PAGE_SIZE);
+    const limit = messageOffset - nextOffset;
     setMessagesLoading(true);
-    const nextMessages = await window.sessionSearch.getMessages(detail.sessionKey, messages.length, MESSAGE_PAGE_SIZE);
-    setMessages((current) => [...current, ...nextMessages]);
-    setMessagesLoading(false);
+    try {
+      const nextMessages = await window.sessionSearch.getMessages(sessionKey, nextOffset, limit);
+      if (requestId !== detailLoadSeqRef.current) return;
+      setMessageOffset(nextOffset);
+      setMessages((current) => [...nextMessages, ...current]);
+    } catch (error) {
+      if (requestId === detailLoadSeqRef.current) {
+        setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      }
+    } finally {
+      if (requestId === detailLoadSeqRef.current) setMessagesLoading(false);
+    }
   }
 
   async function refreshAfterAction(): Promise<void> {
@@ -799,6 +748,7 @@ export function App(): ReactElement {
   }
 
   async function runUtilityAction(label: string, action: () => Promise<void>, successMessage: string): Promise<void> {
+    setContextMenu(null);
     setActionStatus({ kind: "running", message: `${label}...` });
     try {
       await action();
@@ -1255,6 +1205,8 @@ export function App(): ReactElement {
           query={query}
           liveState={getLiveSessionState(detail, liveSessionKeys, liveDetectionFailed)}
           language={language}
+          messagePageSize={MESSAGE_PAGE_SIZE}
+          olderMessageCount={messageOffset}
           revealLabel={FILE_MANAGER_LABEL}
           showItermAction={IS_MAC}
           onClose={closeDetail}
@@ -1429,370 +1381,6 @@ export function App(): ReactElement {
   );
 }
 
-function SkillsDialog({
-  snapshot,
-  loading,
-  feedback,
-  language,
-  revealLabel,
-  onRefresh,
-  onCopyPath,
-  onReveal,
-  onDelete,
-  onClose,
-}: {
-  snapshot: InstalledSkillsSnapshot;
-  loading: boolean;
-  feedback: SkillsFeedback;
-  language: LanguageMode;
-  revealLabel: string;
-  onRefresh: () => void;
-  onCopyPath: (skillPath: string) => void;
-  onReveal: (skillPath: string) => void;
-  onDelete: (skill: InstalledSkill) => Promise<void>;
-  onClose: () => void;
-}): ReactElement {
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  const [query, setQuery] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
-  const [sortKey, setSortKey] = useState<SkillSortKey>("usage");
-  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
-  const [skillContextMenu, setSkillContextMenu] = useState<{ x: number; y: number; skill: InstalledSkill } | null>(null);
-  const [deleteCandidate, setDeleteCandidate] = useState<InstalledSkill | null>(null);
-  const [deletingSkill, setDeletingSkill] = useState(false);
-  const filteredSkills = useMemo(() => {
-    const filtered = filterInstalledSkills(snapshot.skills, query, sourceFilter);
-    return sortInstalledSkills(filtered, sortKey);
-  }, [snapshot.skills, query, sourceFilter, sortKey]);
-  const selectedSkill =
-    filteredSkills.find((skill) => skill.id === selectedSkillId) ??
-    filteredSkills[0] ??
-    null;
-  const codexCount = snapshot.skills.filter((skill) => skill.agent === "codex").length;
-  const claudeCount = snapshot.skills.filter((skill) => skill.agent === "claude").length;
-  const activeItemRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!filteredSkills.length) {
-      if (selectedSkillId) setSelectedSkillId(null);
-      return;
-    }
-    if (!selectedSkillId || !filteredSkills.some((skill) => skill.id === selectedSkillId)) setSelectedSkillId(filteredSkills[0].id);
-  }, [filteredSkills, selectedSkillId]);
-
-  useEffect(() => {
-    activeItemRef.current?.scrollIntoView({ block: "nearest" });
-  }, [selectedSkill?.id]);
-
-  const handleListKeyDown = (event: ReactKeyboardEvent) => {
-    if (event.key === "Escape") {
-      if (deleteCandidate) setDeleteCandidate(null);
-      else if (skillContextMenu) setSkillContextMenu(null);
-      else return;
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    if (!filteredSkills.length) return;
-    event.preventDefault();
-    const currentIndex = filteredSkills.findIndex((skill) => skill.id === selectedSkill?.id);
-    const delta = event.key === "ArrowDown" ? 1 : -1;
-    const nextIndex = Math.min(filteredSkills.length - 1, Math.max(0, (currentIndex < 0 ? 0 : currentIndex) + delta));
-    setSelectedSkillId(filteredSkills[nextIndex].id);
-  };
-
-  const requestDelete = (skill: InstalledSkill) => {
-    setSkillContextMenu(null);
-    setDeleteCandidate(skill);
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteCandidate) return;
-    setDeletingSkill(true);
-    try {
-      await onDelete(deleteCandidate);
-      setDeleteCandidate(null);
-    } finally {
-      setDeletingSkill(false);
-    }
-  };
-
-  return (
-    <div className="dialog-backdrop" onMouseDown={onClose}>
-      <section
-        className="command-dialog skills-dialog"
-        onMouseDown={(event) => {
-          event.stopPropagation();
-          setSkillContextMenu(null);
-        }}
-        onKeyDown={handleListKeyDown}
-      >
-        <div className="dialog-title">
-          <span>{l("Skills", "Skills 管理")}</span>
-          <span className="skills-dialog-count">
-            Codex {formatCompactNumber(codexCount)} · Claude Code {formatCompactNumber(claudeCount)}
-          </span>
-          <button type="button" className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="skills-toolbar">
-          <label className="skills-search">
-            <Search size={14} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={l("Search name, description, or path", "搜索名称、描述或路径")} autoFocus />
-          </label>
-          <div className="skills-filter" role="group" aria-label={l("Skill source filter", "Skill 来源筛选")}>
-            {SKILL_SOURCE_FILTERS.map((filter) => (
-              <button key={filter} className={sourceFilter === filter ? "active" : ""} onClick={() => setSourceFilter(filter)}>
-                {skillFilterLabel(filter, language)}
-              </button>
-            ))}
-          </div>
-          <label className="skills-sort" title={l("Sort skills", "排序 Skills")}>
-            <span>{l("Sort", "排序")}</span>
-            <select value={sortKey} onChange={(event) => setSortKey(event.currentTarget.value as SkillSortKey)} aria-label={l("Sort skills", "排序 Skills")}>
-              <option value="usage">{l("Most used", "最多使用")}</option>
-              <option value="usage-asc">{l("Least used", "最少使用")}</option>
-            </select>
-          </label>
-          <button className="stats-refresh" onClick={onRefresh} disabled={loading} title={l("Refresh skill usage", "刷新 Skill 使用统计")} aria-label={l("Refresh skill usage", "刷新 Skill 使用统计")}>
-            <RefreshCw size={13} />
-          </button>
-        </div>
-
-        <div className="skills-roots">
-          {snapshot.roots.map((root) => (
-            <span key={`${root.source}:${root.path}`} className={root.exists ? "" : "missing"} title={root.path}>
-              <strong>{skillSourceUiLabel(root.source, language)}</strong>
-              {root.exists ? l(`${root.skillCount} skills`, `${root.skillCount} 个`) : l("Missing", "未找到")}
-            </span>
-          ))}
-        </div>
-
-        {feedback ? <div className={`skills-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
-        <div className="skills-shell">
-          <div className="skills-list">
-            {loading ? <div className="skills-empty">{l("Loading installed skills...", "正在加载已安装 Skills...")}</div> : null}
-            {!loading && filteredSkills.length === 0 ? <div className="skills-empty">{l("No skills found.", "没有找到 Skill。")}</div> : null}
-            {!loading
-              ? filteredSkills.map((skill) => (
-                  <button
-                    key={skill.id}
-                    ref={selectedSkill?.id === skill.id ? activeItemRef : undefined}
-                    type="button"
-                    className={`skill-item ${selectedSkill?.id === skill.id ? "active" : ""}`}
-                    onClick={() => setSelectedSkillId(skill.id)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setSelectedSkillId(skill.id);
-                      setSkillContextMenu({ x: event.clientX, y: event.clientY, skill });
-                    }}
-                  >
-                    <span className="skill-item-head">
-                      <strong>{skill.name}</strong>
-                      {skill.usageCount ? <span className="skill-usage-count" title={l("Times used", "使用次数")}>{formatCompactNumber(skill.usageCount)}</span> : null}
-                      <SkillSourceBadge source={skill.source} language={language} />
-                    </span>
-                    <span className="skill-item-desc">{skill.description || l("No description", "无描述")}</span>
-                    <span className="skill-item-path">{skill.path}</span>
-                  </button>
-                ))
-              : null}
-          </div>
-
-          <div className="skill-preview">
-            {selectedSkill ? (
-              <>
-                <div className="skill-preview-head">
-                  <div>
-                    <div className="skill-preview-title">
-                      <h3>{selectedSkill.name}</h3>
-                      <SkillSourceBadge source={selectedSkill.source} language={language} />
-                    </div>
-                    <p>{selectedSkill.description || l("No description", "无描述")}</p>
-                  </div>
-                </div>
-                <dl className="skill-meta">
-                  <div>
-                    <dt>{l("Agent", "Agent")}</dt>
-                    <dd>{selectedSkill.agent === "codex" ? "Codex" : "Claude Code"}</dd>
-                  </div>
-                  <div>
-                    <dt>{l("Used", "使用次数")}</dt>
-                    <dd>
-                      {selectedSkill.usageCount
-                        ? l(`${selectedSkill.usageCount} times`, `${selectedSkill.usageCount} 次`) + (selectedSkill.lastUsedAt ? ` · ${new Date(selectedSkill.lastUsedAt).toLocaleString()}` : "")
-                        : l("Not yet", "暂无")}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{l("Updated", "更新时间")}</dt>
-                    <dd>{new Date(selectedSkill.mtimeMs).toLocaleString()}</dd>
-                  </div>
-                  <div>
-                    <dt>{l("Path", "路径")}</dt>
-                    <dd title={selectedSkill.path}>{selectedSkill.path}</dd>
-                  </div>
-                </dl>
-                <pre className="skill-markdown-preview">{skillPreviewMarkdown(selectedSkill.markdown, language)}</pre>
-              </>
-            ) : (
-              <div className="skills-empty">{l("Select a skill to preview it.", "选择一个 Skill 查看内容。")}</div>
-            )}
-          </div>
-        </div>
-        {skillContextMenu ? (
-          <SkillContextMenu
-            state={skillContextMenu}
-            language={language}
-            revealLabel={revealLabel}
-            onCopyPath={() => {
-              onCopyPath(skillContextMenu.skill.path);
-              setSkillContextMenu(null);
-            }}
-            onReveal={() => {
-              onReveal(skillContextMenu.skill.path);
-              setSkillContextMenu(null);
-            }}
-            onDelete={() => requestDelete(skillContextMenu.skill)}
-          />
-        ) : null}
-        {deleteCandidate ? (
-          <DeleteSkillDialog
-            skill={deleteCandidate}
-            language={language}
-            deleting={deletingSkill}
-            onConfirm={() => void confirmDelete()}
-            onCancel={() => {
-              if (!deletingSkill) setDeleteCandidate(null);
-            }}
-          />
-        ) : null}
-      </section>
-    </div>
-  );
-}
-
-const SKILL_SOURCE_FILTERS: SkillSourceFilter[] = ["all", "codex", "claude", "shared", "project"];
-
-function skillFilterLabel(filter: SkillSourceFilter, language: LanguageMode): string {
-  if (filter === "codex") return "Codex";
-  if (filter === "claude") return "Claude Code";
-  if (filter === "shared") return localize(language, "Shared", "共享");
-  if (filter === "project") return localize(language, "Project", "项目");
-  return localize(language, "All", "全部");
-}
-
-function skillSourceUiLabel(source: SkillSource, language: LanguageMode): string {
-  if (source === "codex-shared") return localize(language, "Shared", "共享");
-  if (source === "codex-system") return localize(language, "Codex System", "Codex 系统");
-  if (source === "claude-project") return localize(language, "Project", "项目");
-  if (source === "claude-plugin") return localize(language, "Claude Plugin", "Claude 插件");
-  return skillSourceLabel(source);
-}
-
-function SkillSourceBadge({ source, language }: { source: SkillSource; language: LanguageMode }): ReactElement {
-  return <span className={`skill-source-badge ${source}`}>{skillSourceUiLabel(source, language)}</span>;
-}
-
-function SkillContextMenu({
-  state,
-  language,
-  revealLabel,
-  onCopyPath,
-  onReveal,
-  onDelete,
-}: {
-  state: { x: number; y: number; skill: InstalledSkill };
-  language: LanguageMode;
-  revealLabel: string;
-  onCopyPath: () => void;
-  onReveal: () => void;
-  onDelete: () => void;
-}): ReactElement {
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  const canDelete = state.skill.source !== "codex-system";
-  return (
-    <div
-      className="context-menu skill-context-menu"
-      style={{ left: state.x, top: state.y }}
-      onClick={(event) => event.stopPropagation()}
-      onMouseDown={(event) => event.stopPropagation()}
-    >
-      <button type="button" onClick={onCopyPath}>
-        <Copy size={14} /> {l("Copy Path", "复制路径")}
-      </button>
-      <button type="button" onClick={onReveal}>
-        <FolderOpen size={14} /> {l(`Show in ${revealLabel}`, `在 ${revealLabel} 中显示`)}
-      </button>
-      <hr />
-      <button
-        type="button"
-        className="danger"
-        onClick={onDelete}
-        disabled={!canDelete}
-        title={canDelete ? l("Delete this skill", "删除这个 Skill") : l("Codex system skills cannot be deleted here.", "Codex 系统 Skill 不能在这里删除。")}
-      >
-        <Trash2 size={14} /> {l("Delete Skill", "删除 Skill")}
-      </button>
-    </div>
-  );
-}
-
-function DeleteSkillDialog({
-  skill,
-  language,
-  deleting,
-  onConfirm,
-  onCancel,
-}: {
-  skill: InstalledSkill;
-  language: LanguageMode;
-  deleting: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-}): ReactElement {
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  return (
-    <div className="dialog-backdrop" onMouseDown={onCancel}>
-      <div className="command-dialog delete-skill-dialog" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dialog-title">
-          <span>{l("Delete Skill", "删除 Skill")}</span>
-          <button type="button" className="icon-button" onClick={onCancel} disabled={deleting} aria-label={l("Close", "关闭")}>
-            <X size={16} />
-          </button>
-        </div>
-        <p className="dialog-copy">
-          {l("Delete", "删除")} <strong>{skill.name}</strong>
-          {l(" permanently?", "？")}
-        </p>
-        <p className="dialog-copy danger-copy">
-          {l("This deletes the whole skill folder and cannot be undone.", "这会删除整个 Skill 文件夹，无法撤销。")}
-        </p>
-        <div className="delete-skill-path" title={skill.directoryPath}>
-          {skill.directoryPath}
-        </div>
-        <div className="dialog-actions">
-          <button type="button" onClick={onCancel} disabled={deleting}>
-            {l("Cancel", "取消")}
-          </button>
-          <button type="button" className="danger-action" onClick={onConfirm} disabled={deleting}>
-            {deleting ? l("Deleting...", "正在删除...") : l("Delete Permanently", "永久删除")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function skillPreviewMarkdown(markdown: string, language: LanguageMode): string {
-  const limit = 12000;
-  if (markdown.length <= limit) return markdown;
-  return `${markdown.slice(0, limit)}\n\n${localize(language, "...(truncated)", "...（已截断）")}`;
-}
-
 function QuotaPanel({
   snapshot,
   loading,
@@ -1820,7 +1408,13 @@ function QuotaPanel({
           {updatedAt ? <em>{updatedAt}</em> : null}
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
-        <button className="quota-refresh" onClick={onRefresh} disabled={loading} title={l("Refresh usage limits", "刷新额度")} aria-label={l("Refresh usage limits", "刷新额度")}>
+        <button
+          className="quota-refresh"
+          onClick={onRefresh}
+          disabled={loading}
+          title={l("Refresh usage limits", "刷新额度")}
+          aria-label={l("Refresh usage limits", "刷新额度")}
+        >
           <RefreshCw size={13} />
         </button>
       </div>
@@ -1830,7 +1424,9 @@ function QuotaPanel({
             {snapshot.providers.map((card) => (
               <QuotaProviderCard key={card.provider} card={card} language={language} />
             ))}
-            {snapshot.providers.length === 0 ? <div className="quota-empty">{loading ? l("Checking usage limits...", "正在检查额度...") : l("Usage limits unavailable.", "额度不可用。")}</div> : null}
+            {snapshot.providers.length === 0 ? (
+              <div className="quota-empty">{loading ? l("Checking usage limits...", "正在检查额度...") : l("Usage limits unavailable.", "额度不可用。")}</div>
+            ) : null}
           </div>
           {feedback ? <div className={`quota-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
         </>
@@ -1973,322 +1569,38 @@ function SessionRow({
   );
 }
 
-type ConversationTimelineItem =
-  | { kind: "message"; key: string; timestampMs: number | null; order: number; message: SessionMessage }
-  | { kind: "trace"; key: string; timestampMs: number | null; order: number; event: SessionTraceEvent };
-
-function timestampMs(timestamp: string): number | null {
-  if (!timestamp) return null;
-  const parsed = new Date(timestamp).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function conversationTimeline(messages: SessionMessage[], traceEvents: SessionTraceEvent[]): ConversationTimelineItem[] {
-  const messageTimes = messages.map((message) => timestampMs(message.timestamp)).filter((time): time is number => time !== null);
-  const maxMessageTime = messageTimes.length > 0 ? Math.max(...messageTimes) : null;
-  const visibleTraceEvents =
-    messages.length === 0
-      ? traceEvents
-      : traceEvents.filter((event) => {
-          const time = timestampMs(event.timestamp);
-          return time === null || maxMessageTime === null || time <= maxMessageTime;
-        });
-
-  const items: ConversationTimelineItem[] = [
-    ...messages.map((message) => ({
-      kind: "message" as const,
-      key: `message:${message.index}`,
-      timestampMs: timestampMs(message.timestamp),
-      order: message.index * 2,
-      message,
-    })),
-    ...visibleTraceEvents.map((event) => ({
-      kind: "trace" as const,
-      key: `trace:${event.index}`,
-      timestampMs: timestampMs(event.timestamp),
-      order: event.index * 2 + 1,
-      event,
-    })),
-  ];
-
-  return items.sort((a, b) => {
-    if (a.timestampMs !== null && b.timestampMs !== null && a.timestampMs !== b.timestampMs) {
-      return a.timestampMs - b.timestampMs;
-    }
-    if (a.timestampMs !== null && b.timestampMs === null) return -1;
-    if (a.timestampMs === null && b.timestampMs !== null) return 1;
-    return a.order - b.order;
-  });
-}
-
-function DetailPanel({
-  session,
-  messages,
-  traceEvents,
-  loading,
-  actionStatus,
-  query,
-  liveState,
-  language,
-  revealLabel,
-  showItermAction,
-  onClose,
-  onShowMore,
-  onRename,
-  onAddTag,
-  onRemoveTag,
-  onRenameTitle,
-  onFavorite,
-  onResume,
-  onResumeIterm,
-  onCopyResume,
-  onCopyMarkdown,
-  onExportMarkdown,
-  onCopyPlain,
-  onDelete,
-  onReveal,
-}: {
-  session: SessionSearchResult;
-  messages: SessionMessage[];
-  traceEvents: SessionTraceEvent[];
-  loading: boolean;
-  actionStatus: ActionStatus | null;
-  query: string;
-  liveState: LiveSessionState;
-  language: LanguageMode;
-  revealLabel: string;
-  showItermAction: boolean;
-  onClose: () => void;
-  onShowMore: () => void;
-  onRename: () => void;
-  onAddTag: () => void;
-  onRemoveTag: (tagName: string) => void;
-  onRenameTitle: () => void;
-  onFavorite: () => void;
-  onResume: () => void;
-  onResumeIterm: () => void;
-  onCopyResume: () => void;
-  onCopyMarkdown: () => void;
-  onExportMarkdown: () => void;
-  onCopyPlain: () => void;
-  onDelete: () => void;
-  onReveal: () => void;
-}): ReactElement {
-  const matchIndex = query
-    ? messages.findIndex((message) => message.content.toLowerCase().includes(query.toLowerCase()))
-    : -1;
-  const context = matchIndex >= 0 ? messages.slice(Math.max(0, matchIndex - 1), Math.min(messages.length, matchIndex + 2)) : [];
-  const actionRunning = actionStatus?.kind === "running";
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const timelineItems = useMemo(() => conversationTimeline(messages, traceEvents), [messages, traceEvents]);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const el = bodyRef.current;
-      if (!el) return;
-      const target = event.target as HTMLElement | null;
-      const tag = target?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      const page = el.clientHeight * 0.9;
-      switch (event.key) {
-        case "ArrowDown":
-          el.scrollBy({ top: 64 });
-          break;
-        case "ArrowUp":
-          el.scrollBy({ top: -64 });
-          break;
-        case "PageDown":
-        case " ":
-          el.scrollBy({ top: page });
-          break;
-        case "PageUp":
-          el.scrollBy({ top: -page });
-          break;
-        case "Home":
-          el.scrollTo({ top: 0 });
-          break;
-        case "End":
-          el.scrollTo({ top: el.scrollHeight });
-          break;
-        default:
-          return;
-      }
-      event.preventDefault();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  return (
-    <div className="detail-backdrop" onClick={onClose}>
-    <aside className="detail" onClick={(event) => event.stopPropagation()}>
-      <div className="detail-header">
-        <div>
-          <div className="detail-badges">
-            <div className={`source-badge ${sourceUiFamily(session.source)}`}>
-              {SOURCE_LABEL[session.source]}
-            </div>
-            <span className={`live-status ${liveState}`}>
-              <span className="live-status-dot" />
-              {localizedLiveStateLabel(liveState, language)}
-            </span>
-          </div>
-          <div className="detail-title-row">
-            <h2>{session.displayTitle}</h2>
-            <button className="title-edit-button detail-title-edit" onClick={onRenameTitle} aria-label={l("Rename session", "重命名会话")} title={l("Rename session", "重命名会话")}>
-              <Edit3 size={14} />
-            </button>
-          </div>
-          <p>
-            {session.projectPath || l("No project", "无项目")} · {new Date(session.timestamp).toLocaleString()} · {l(`${messages.length} messages`, `${messages.length} 条消息`)} ·{" "}
-            {l(`${formatTokenCount(session.tokenUsage.totalTokens)} tokens`, `${formatTokenCount(session.tokenUsage.totalTokens)} token`)}
-            {traceEvents.length > 0 ? <> · {l(`${traceEvents.length} trace events`, `${traceEvents.length} 条轨迹`)}</> : null}
-          </p>
-        </div>
-        <div className="detail-header-actions">
-          <button
-            className={`icon-button favorite-button ${session.favorited ? "active" : ""}`}
-            onClick={onFavorite}
-            aria-label={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
-            title={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
-          >
-            <Star size={17} fill={session.favorited ? "currentColor" : "none"} />
-          </button>
-          <button className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
-            <X size={17} />
-          </button>
-        </div>
-      </div>
-      <div className="detail-actions">
-        <button onClick={onResume} disabled={actionRunning}>
-          <Play size={15} /> Resume
-        </button>
-        {showItermAction ? (
-          <button onClick={onResumeIterm} disabled={actionRunning}>
-            <TerminalIcon size={15} /> iTerm
-          </button>
-        ) : null}
-        <button onClick={onRename} disabled={actionRunning}>
-          <Clipboard size={15} /> {l("Rename", "重命名")}
-        </button>
-        <button onClick={onAddTag} disabled={actionRunning}>
-          <Tag size={15} /> {l("Add Tag", "添加标签")}
-        </button>
-        <button onClick={onCopyResume} disabled={actionRunning}>
-          <Copy size={15} /> {l("Copy Cmd", "复制命令")}
-        </button>
-        <button onClick={onCopyMarkdown} disabled={actionRunning}>Markdown</button>
-        <button onClick={onExportMarkdown} disabled={actionRunning}>
-          <Download size={15} /> {l("Export MD", "导出 MD")}
-        </button>
-        <button onClick={onCopyPlain} disabled={actionRunning}>{l("Plain Text", "纯文本")}</button>
-        <button className="danger" onClick={onDelete} disabled={actionRunning}>
-          <Trash2 size={15} /> {l("Delete", "删除")}
-        </button>
-        <button onClick={onReveal} disabled={actionRunning}>
-          <FolderOpen size={15} /> {revealLabel}
-        </button>
-      </div>
-      <div className="detail-tags">
-        {session.tags.map((tagName) => (
-          <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)}>
-            #{tagName} ×
-          </button>
-        ))}
-      </div>
-      <div className="detail-body" ref={bodyRef}>
-        {context.length > 0 ? (
-          <section className="matched">
-            <h3>{l("Matched Context", "命中上下文")}</h3>
-            {context.map((message) => (
-              <MessageBlock key={message.index} message={message} query={query} language={language} />
-            ))}
-          </section>
-        ) : null}
-        <section className="conversation">
-          <h3>{l("Full Conversation", "完整会话")}</h3>
-          {loading ? <div className="loading-state">{l("Loading conversation...", "正在加载会话...")}</div> : null}
-          {!loading && messages.length === 0 ? <div className="loading-state">{l("No visible messages indexed for this session.", "这个会话没有可见消息被索引。")}</div> : null}
-          {timelineItems.map((item) => (
-            item.kind === "message" ? (
-              <MessageBlock key={item.key} message={item.message} query={query} language={language} />
-            ) : (
-              <TraceEventBlock key={item.key} event={item.event} language={language} />
-            )
-          ))}
-          {!loading && messages.length < session.messageCount ? (
-            <button className="show-more" onClick={onShowMore}>
-              {l(`Show ${Math.min(MESSAGE_PAGE_SIZE, session.messageCount - messages.length)} more messages`, `再显示 ${Math.min(MESSAGE_PAGE_SIZE, session.messageCount - messages.length)} 条消息`)}
-            </button>
-          ) : null}
-        </section>
-      </div>
-    </aside>
-    </div>
-  );
-}
-
-function MessageBlock({ message, query, language }: { message: SessionMessage; query: string; language: LanguageMode }): ReactElement {
-  const content = useMemo(() => {
-    const text =
-      message.content.length > 3000
-        ? `${message.content.slice(0, 3000)}\n\n${localize(language, "...(truncated)", "...（已截断）")}`
-        : message.content;
-    if (!query) return text;
-    return text;
-  }, [message.content, query, language]);
-
-  return (
-    <div className={`message ${message.role}`}>
-      <div className="message-head">
-        <strong>{message.role === "user" ? localize(language, "User", "用户") : localize(language, "Assistant", "助手")}</strong>
-        <span>{formatMessageTime(message.timestamp)}</span>
-      </div>
-      <pre>{content}</pre>
-    </div>
-  );
-}
-
-function traceStatusSymbol(event: SessionTraceEvent): string {
-  if (event.kind === "tool_call") return "→";
-  if (event.status === "success") return "✓";
-  if (event.status === "failure") return "✗";
-  return "•";
-}
-
-function TraceEventBlock({ event, language }: { event: SessionTraceEvent; language: LanguageMode }): ReactElement {
-  const detail = useMemo(() => {
-    if (!event.detail) return localize(language, "No detail captured.", "没有记录详情。");
-    return event.detail.length > 2400
-      ? `${event.detail.slice(0, 2400)}\n\n${localize(language, "...(truncated)", "...（已截断）")}`
-      : event.detail;
-  }, [event.detail, language]);
-
-  return (
-    <details className={`trace-event ${event.kind} ${event.status || "unknown"}`}>
-      <summary className="trace-head">
-        <strong>
-          <span className="trace-symbol">{traceStatusSymbol(event)}</span>
-          {event.title}
-        </strong>
-        <span>{formatMessageTime(event.timestamp)}</span>
-      </summary>
-      <div className="trace-meta">
-        {event.eventType ? <span>{event.eventType}</span> : null}
-        {event.callId ? <span>{event.callId}</span> : null}
-      </div>
-      <pre>{detail}</pre>
-    </details>
-  );
-}
-
 function ActionToast({ status }: { status: ActionStatus }): ReactElement {
   return (
     <div className={`action-toast ${status.kind}`} role="status" aria-live="polite">
       {status.message}
     </div>
   );
+}
+
+function quotaStatusLabel(status: UsageQuotaCard["status"], language: LanguageMode): string {
+  if (status === "supported") return localize(language, "Live", "可用");
+  if (status === "unsupported_api_key") return localize(language, "Unsupported", "不支持");
+  if (status === "error") return localize(language, "Error", "错误");
+  return localize(language, "Setup", "设置");
+}
+
+function formatQuotaReset(resetsAt: string | undefined, language: LanguageMode): string {
+  if (!resetsAt) return "";
+  const timestamp = Date.parse(resetsAt);
+  if (!Number.isFinite(timestamp)) return "";
+  const diff = timestamp - Date.now();
+  if (diff <= 0) return localize(language, "reset due", "应重置");
+  const minutes = Math.ceil(diff / 60_000);
+  if (minutes < 60) return localize(language, `resets in ${minutes}m`, `${minutes} 分钟后重置`);
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const remainingMinutes = minutes - hours * 60;
+    return remainingMinutes > 0
+      ? localize(language, `resets in ${hours}h ${remainingMinutes}m`, `${hours} 小时 ${remainingMinutes} 分钟后重置`)
+      : localize(language, `resets in ${hours}h`, `${hours} 小时后重置`);
+  }
+  const days = Math.ceil(hours / 24);
+  return localize(language, `resets in ${days}d`, `${days} 天后重置`);
 }
 
 function ContextMenu({
@@ -2373,451 +1685,6 @@ function ContextMenu({
       <button className="danger" onClick={onDelete}>
         <Trash2 size={14} /> {l("Delete Session", "删除会话")}
       </button>
-    </div>
-  );
-}
-
-function ApiConfigDialog({
-  settings,
-  language,
-  feedback,
-  onSettingsChange,
-  onApplyToCodex,
-  onApplyToClaude,
-  onClose,
-}: {
-  settings: AppSettings | null;
-  language: LanguageMode;
-  feedback: SettingsFeedback;
-  onSettingsChange: (settings: AppSettingsUpdate) => void;
-  onApplyToCodex: (apiConfig: ApiConfig) => void;
-  onApplyToClaude: (claudeApiConfig: ClaudeApiConfig) => void;
-  onClose: () => void;
-}): ReactElement {
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  const saving = feedback?.kind === "running";
-  const [apiTarget, setApiTarget] = useState<"codex" | "claude">("codex");
-  const [showCodexApiKey, setShowCodexApiKey] = useState(false);
-  const [showClaudeApiKey, setShowClaudeApiKey] = useState(false);
-  const [draftApiConfig, setDraftApiConfig] = useState<ApiConfig>(() => settings?.apiConfig ?? { ...defaultApiConfig });
-  const [draftClaudeApiConfig, setDraftClaudeApiConfig] = useState<ClaudeApiConfig>(
-    () => settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig },
-  );
-  const apiPresetSelectionRef = useRef(0);
-  const claudeApiPresetSelectionRef = useRef(0);
-  const updateDraftApiConfig = (next: Partial<ApiConfig>) => setDraftApiConfig((current) => ({ ...current, ...next }));
-  const updateDraftClaudeApiConfig = (next: Partial<ClaudeApiConfig>) => setDraftClaudeApiConfig((current) => ({ ...current, ...next }));
-  const selectedPreset = API_PROVIDER_PRESETS.find((preset) => preset.id === draftApiConfig.customProviderId) ?? API_PROVIDER_PRESETS[0];
-  const customName = selectedPreset?.label ?? (draftApiConfig.customProviderName || "CodexZH");
-  const selectedClaudePreset =
-    CLAUDE_API_PROVIDER_PRESETS.find((preset) => preset.id === draftClaudeApiConfig.customProviderId) ?? CLAUDE_API_PROVIDER_PRESETS[0];
-  const customClaudeName = selectedClaudePreset?.label ?? (draftClaudeApiConfig.customProviderName || "Claude Code");
-
-  const selectApiPreset = async (presetId: ApiProviderPresetId) => {
-    const selectionId = ++apiPresetSelectionRef.current;
-    const preset = API_PROVIDER_PRESETS.find((item) => item.id === presetId) ?? API_PROVIDER_PRESETS[0];
-    const apiKey = await window.sessionSearch.getApiProviderKey("codex", preset.id).catch(() => "");
-    if (selectionId !== apiPresetSelectionRef.current) return;
-    setDraftApiConfig((current) => ({
-      ...current,
-      activeProvider: "custom",
-      customProviderId: preset.id,
-      customProviderName: preset.providerName,
-      customBaseUrl: preset.baseUrl,
-      customApiKey: apiKey,
-      customModel: preset.model,
-      customApiFormat: preset.apiFormat,
-    }));
-    setShowCodexApiKey(false);
-  };
-
-  const selectClaudeApiPreset = async (presetId: ClaudeApiProviderPresetId) => {
-    const selectionId = ++claudeApiPresetSelectionRef.current;
-    const preset = CLAUDE_API_PROVIDER_PRESETS.find((item) => item.id === presetId) ?? CLAUDE_API_PROVIDER_PRESETS[0];
-    const apiKey = await window.sessionSearch.getApiProviderKey("claude", preset.id).catch(() => "");
-    if (selectionId !== claudeApiPresetSelectionRef.current) return;
-    setDraftClaudeApiConfig((current) => {
-      if (preset.id === "custom") {
-        return {
-          ...current,
-          activeProvider: "custom",
-          customProviderId: "custom",
-          customProviderName: current.customProviderName || preset.providerName,
-          customApiKey: apiKey,
-        };
-      }
-      return {
-        ...current,
-        activeProvider: "custom",
-        customProviderId: preset.id,
-        customProviderName: preset.providerName,
-        customBaseUrl: preset.baseUrl,
-        customApiKey: apiKey,
-        customModel: preset.model,
-        customHaikuModel: preset.haikuModel,
-        customSonnetModel: preset.sonnetModel,
-        customOpusModel: preset.opusModel,
-        customApiFormat: preset.apiFormat,
-        customApiKeyField: preset.apiKeyField,
-      };
-    });
-    setShowClaudeApiKey(false);
-  };
-
-  useEffect(() => {
-    setDraftApiConfig(settings?.apiConfig ?? { ...defaultApiConfig });
-    setDraftClaudeApiConfig(settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig });
-  }, [settings?.apiConfig, settings?.claudeApiConfig]);
-
-  const saveDraft = () => {
-    if (apiTarget === "codex") onSettingsChange({ apiConfig: draftApiConfig });
-    else onSettingsChange({ claudeApiConfig: draftClaudeApiConfig });
-  };
-
-  const applyDraft = () => {
-    if (apiTarget === "codex") onApplyToCodex(draftApiConfig);
-    else onApplyToClaude(draftClaudeApiConfig);
-  };
-
-  return (
-    <div className="dialog-backdrop" onMouseDown={onClose}>
-      <section className="command-dialog api-config-dialog" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dialog-title">
-          <span>{l("API configuration", "API 配置")}</span>
-          <button type="button" className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
-            <X size={16} />
-          </button>
-        </div>
-        <div className="api-target-tabs" role="tablist" aria-label={l("API target", "API 目标")}>
-          <button type="button" className={apiTarget === "codex" ? "active" : ""} onClick={() => setApiTarget("codex")}>
-            Codex
-          </button>
-          <button type="button" className={apiTarget === "claude" ? "active" : ""} onClick={() => setApiTarget("claude")}>
-            Claude Code
-          </button>
-        </div>
-        <div className="api-config-body">
-          {apiTarget === "codex" ? (
-            <section className="settings-pane api-settings-form">
-            <header className="settings-pane-head">
-              <h3>{l("Codex providers", "Codex 供应商")}</h3>
-              <p>{l("Switch Codex between the official account and common OpenAI-compatible routes.", "在 Codex 官网账号和常用 OpenAI-compatible 路径之间切换。")}</p>
-            </header>
-            <div
-              className="api-provider-switch"
-              role="group"
-              aria-label={l("Codex provider", "Codex 供应商")}
-              data-provider-labels="CodexZH DeepSeek GLM LongCat Kimi MiMo"
-            >
-              <button
-                type="button"
-                className={draftApiConfig.activeProvider === "official" ? "active" : ""}
-                disabled={!settings || saving}
-                onClick={() => {
-                  apiPresetSelectionRef.current += 1;
-                  updateDraftApiConfig({ activeProvider: "official" });
-                }}
-              >
-                <strong>Codex Official</strong>
-                <span>{l("Use existing official Codex auth.", "使用现有 Codex 官网认证。")}</span>
-              </button>
-              {API_PROVIDER_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  className={draftApiConfig.activeProvider === "custom" && draftApiConfig.customProviderId === preset.id ? "active" : ""}
-                  disabled={!settings || saving}
-                  onClick={() => void selectApiPreset(preset.id)}
-                >
-                  <strong>{preset.label}</strong>
-                  <span>{preset.model}</span>
-                </button>
-              ))}
-            </div>
-            {draftApiConfig.activeProvider === "official" ? (
-              <div className="api-config-note">
-                {l(
-                  "Apply clears Codex route fields in ~/.codex/config.toml so Codex uses its default official route, and preserves auth.json.",
-                  "应用时会清理 ~/.codex/config.toml 里的 Codex 路由字段，让 Codex 使用默认官网路由，并保留现有 auth.json。",
-                )}
-              </div>
-            ) : null}
-            {draftApiConfig.activeProvider === "custom" ? (
-              <>
-                <div className="api-config-note">
-                  {draftApiConfig.customProviderId === "codexzh"
-                    ? l("Apply updates the active ~/.codex/config.toml route and preserves existing auth.json.", "应用时只更新当前 ~/.codex/config.toml 的路由配置，并保留现有 auth.json。")
-                    : l(`Apply merges the ${customName} route into ~/.codex/config.toml and preserves existing auth.json.`, `应用时会把 ${customName} 路由合并到 ~/.codex/config.toml，并保留现有 auth.json。`)}
-                </div>
-                <label className="settings-field">
-                  <div className="settings-field-text">
-                    <span className="settings-field-title">{l("Provider name", "供应商名称")}</span>
-                    <span className="settings-field-sub">{l("Display name for this custom Codex route.", "这个自定义 Codex 路径的显示名称。")}</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={draftApiConfig.customProviderName}
-                    disabled={!settings || saving}
-                    placeholder="CodexZH"
-                    onChange={(event) => updateDraftApiConfig({ customProviderName: event.currentTarget.value })}
-                  />
-                </label>
-                <label className="settings-field">
-                  <div className="settings-field-text">
-                    <span className="settings-field-title">Base URL</span>
-                    <span className="settings-field-sub">{l("OpenAI-compatible endpoint, usually ending in /v1.", "OpenAI-compatible 接口地址，通常以 /v1 结尾。")}</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={draftApiConfig.customBaseUrl}
-                    disabled={!settings || saving}
-                    placeholder="https://api.example.com/v1"
-                    onChange={(event) => updateDraftApiConfig({ customBaseUrl: event.currentTarget.value })}
-                  />
-                </label>
-                <label className="settings-field">
-                  <div className="settings-field-text">
-                    <span className="settings-field-title">API Key</span>
-                    <span className="settings-field-sub">{l("Stored locally. Applying it to Codex CLI will be a separate explicit action.", "保存在本地；写入 Codex CLI 会作为单独的显式动作。")}</span>
-                  </div>
-                  <div className="secret-input">
-                    <input
-                      type={showCodexApiKey ? "text" : "password"}
-                      value={draftApiConfig.customApiKey}
-                      disabled={!settings || saving}
-                      placeholder="sk-..."
-                      onChange={(event) => updateDraftApiConfig({ customApiKey: event.currentTarget.value })}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowCodexApiKey((current) => !current)}
-                      disabled={!settings || saving}
-                      aria-label={showCodexApiKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
-                      title={showCodexApiKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
-                    >
-                      {showCodexApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
-                    </button>
-                  </div>
-                </label>
-                <label className="settings-field">
-                  <div className="settings-field-text">
-                    <span className="settings-field-title">{l("Model", "模型")}</span>
-                    <span className="settings-field-sub">{l("Model name for this Codex route.", "这个 Codex 路径使用的模型名称。")}</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={draftApiConfig.customModel}
-                    disabled={!settings || saving}
-                    placeholder="gpt-5.5"
-                    onChange={(event) => updateDraftApiConfig({ customModel: event.currentTarget.value })}
-                  />
-                </label>
-                <label className="settings-field">
-                  <div className="settings-field-text">
-                    <span className="settings-field-title">{l("API format", "API 格式")}</span>
-                    <span className="settings-field-sub">{l("Matches cc-switch's OpenAI Chat / Responses split.", "对应 cc-switch 里的 OpenAI Chat / Responses 区分。")}</span>
-                  </div>
-                  <select
-                    value={draftApiConfig.customApiFormat}
-                    disabled={!settings || saving}
-                    onChange={(event) => updateDraftApiConfig({ customApiFormat: event.currentTarget.value as ApiConfig["customApiFormat"] })}
-                  >
-                    <option value="openai_chat">OpenAI Chat Completions</option>
-                    <option value="openai_responses">OpenAI Responses API</option>
-                  </select>
-                </label>
-              </>
-            ) : null}
-            </section>
-          ) : (
-            <section className="settings-pane api-settings-form">
-              <header className="settings-pane-head">
-                <h3>{l("Claude Code providers", "Claude Code 供应商")}</h3>
-                <p>{l("Switch Claude Code between official auth and common Anthropic-compatible routes.", "在 Claude 官方认证和常用 Anthropic-compatible 路径之间切换。")}</p>
-              </header>
-              <div
-                className="api-provider-switch"
-                role="group"
-                aria-label={l("Claude Code provider", "Claude Code 供应商")}
-                data-provider-labels="Custom DeepSeek GLM LongCat Kimi MiMo"
-              >
-                <button
-                  type="button"
-                  className={draftClaudeApiConfig.activeProvider === "official" ? "active" : ""}
-                  disabled={!settings || saving}
-                  onClick={() => {
-                    claudeApiPresetSelectionRef.current += 1;
-                    updateDraftClaudeApiConfig({ activeProvider: "official" });
-                  }}
-                >
-                  <strong>Claude Official</strong>
-                  <span>{l("Use existing Claude Code auth.", "使用现有 Claude Code 官方认证。")}</span>
-                </button>
-                {CLAUDE_API_PROVIDER_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    className={draftClaudeApiConfig.activeProvider === "custom" && draftClaudeApiConfig.customProviderId === preset.id ? "active" : ""}
-                    disabled={!settings || saving}
-                    onClick={() => void selectClaudeApiPreset(preset.id)}
-                  >
-                    <strong>{preset.label}</strong>
-                    <span>{preset.model || l("Manual route", "手动配置")}</span>
-                  </button>
-                ))}
-              </div>
-              {draftClaudeApiConfig.activeProvider === "official" ? (
-                <div className="api-config-note">
-                  {l("Apply clears third-party route env keys in ~/.claude/settings.json and keeps other Claude settings.", "应用时会清理 ~/.claude/settings.json 里的第三方路由 env，并保留其他 Claude 设置。")}
-                </div>
-              ) : null}
-              {draftClaudeApiConfig.activeProvider === "custom" ? (
-                <>
-                  <div className="api-config-note">
-                    {l(`Apply writes ${customClaudeName} route env into ~/.claude/settings.json.`, `应用时会把 ${customClaudeName} 路由 env 写入 ~/.claude/settings.json。`)}
-                  </div>
-                  <label className="settings-field">
-                    <div className="settings-field-text">
-                      <span className="settings-field-title">{l("Provider name", "供应商名称")}</span>
-                      <span className="settings-field-sub">{l("Display name for this Claude Code route.", "这个 Claude Code 路径的显示名称。")}</span>
-                    </div>
-                    <input
-                      type="text"
-                      value={draftClaudeApiConfig.customProviderName}
-                      disabled={!settings || saving}
-                      placeholder="Custom Claude"
-                      onChange={(event) => updateDraftClaudeApiConfig({ customProviderName: event.currentTarget.value })}
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <div className="settings-field-text">
-                      <span className="settings-field-title">Base URL</span>
-                      <span className="settings-field-sub">{l("Anthropic-compatible endpoint for Claude Code.", "Claude Code 使用的 Anthropic-compatible 接口地址。")}</span>
-                    </div>
-                    <input
-                      type="text"
-                      value={draftClaudeApiConfig.customBaseUrl}
-                      disabled={!settings || saving}
-                      placeholder="https://api.example.com/anthropic"
-                      onChange={(event) => updateDraftClaudeApiConfig({ customBaseUrl: event.currentTarget.value })}
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <div className="settings-field-text">
-                      <span className="settings-field-title">API Key</span>
-                      <span className="settings-field-sub">{l("Stored locally and written to Claude Code only when applied.", "保存在本地，只在应用时写入 Claude Code。")}</span>
-                    </div>
-                    <div className="secret-input">
-                      <input
-                        type={showClaudeApiKey ? "text" : "password"}
-                        value={draftClaudeApiConfig.customApiKey}
-                        disabled={!settings || saving}
-                        placeholder="sk-..."
-                        onChange={(event) => updateDraftClaudeApiConfig({ customApiKey: event.currentTarget.value })}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowClaudeApiKey((current) => !current)}
-                        disabled={!settings || saving}
-                        aria-label={showClaudeApiKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
-                        title={showClaudeApiKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
-                      >
-                        {showClaudeApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
-                      </button>
-                    </div>
-                  </label>
-                  <label className="settings-field">
-                    <div className="settings-field-text">
-                      <span className="settings-field-title">{l("Model", "模型")}</span>
-                      <span className="settings-field-sub">{l("Primary Claude Code model env.", "Claude Code 的主模型 env。")}</span>
-                    </div>
-                    <input
-                      type="text"
-                      value={draftClaudeApiConfig.customModel}
-                      disabled={!settings || saving}
-                      placeholder="claude-sonnet-4.6"
-                      onChange={(event) => updateDraftClaudeApiConfig({ customModel: event.currentTarget.value })}
-                    />
-                  </label>
-                  <div className="api-model-grid">
-                    <label className="settings-field">
-                      <div className="settings-field-text">
-                        <span className="settings-field-title">Haiku</span>
-                      </div>
-                      <input
-                        type="text"
-                        value={draftClaudeApiConfig.customHaikuModel}
-                        disabled={!settings || saving}
-                        placeholder={draftClaudeApiConfig.customModel || "haiku model"}
-                        onChange={(event) => updateDraftClaudeApiConfig({ customHaikuModel: event.currentTarget.value })}
-                      />
-                    </label>
-                    <label className="settings-field">
-                      <div className="settings-field-text">
-                        <span className="settings-field-title">Sonnet</span>
-                      </div>
-                      <input
-                        type="text"
-                        value={draftClaudeApiConfig.customSonnetModel}
-                        disabled={!settings || saving}
-                        placeholder={draftClaudeApiConfig.customModel || "sonnet model"}
-                        onChange={(event) => updateDraftClaudeApiConfig({ customSonnetModel: event.currentTarget.value })}
-                      />
-                    </label>
-                    <label className="settings-field">
-                      <div className="settings-field-text">
-                        <span className="settings-field-title">Opus</span>
-                      </div>
-                      <input
-                        type="text"
-                        value={draftClaudeApiConfig.customOpusModel}
-                        disabled={!settings || saving}
-                        placeholder={draftClaudeApiConfig.customModel || "opus model"}
-                        onChange={(event) => updateDraftClaudeApiConfig({ customOpusModel: event.currentTarget.value })}
-                      />
-                    </label>
-                  </div>
-                  <label className="settings-field">
-                    <div className="settings-field-text">
-                      <span className="settings-field-title">{l("Key env", "Key 环境变量")}</span>
-                      <span className="settings-field-sub">{l("Most Claude Code routes use ANTHROPIC_AUTH_TOKEN.", "大多数 Claude Code 路径使用 ANTHROPIC_AUTH_TOKEN。")}</span>
-                    </div>
-                    <select
-                      value={draftClaudeApiConfig.customApiKeyField}
-                      disabled={!settings || saving}
-                      onChange={(event) =>
-                        updateDraftClaudeApiConfig({ customApiKeyField: event.currentTarget.value as ClaudeApiConfig["customApiKeyField"] })
-                      }
-                    >
-                      <option value="ANTHROPIC_AUTH_TOKEN">ANTHROPIC_AUTH_TOKEN</option>
-                      <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY</option>
-                    </select>
-                  </label>
-                </>
-              ) : null}
-            </section>
-          )}
-        </div>
-        <div className="dialog-actions api-config-actions">
-          <button type="button" onClick={onClose} disabled={saving}>
-            {l("Cancel", "取消")}
-          </button>
-          <button type="button" disabled={!settings || saving} onClick={saveDraft}>
-            {l("Save", "保存")}
-          </button>
-          <button
-            type="button"
-            className="primary-action"
-            disabled={!settings || saving}
-            onClick={applyDraft}
-          >
-            {apiTarget === "codex" ? l("Apply to Codex", "应用到 Codex") : l("Apply to Claude Code", "应用到 Claude Code")}
-          </button>
-        </div>
-        <div className={`settings-feedback ${feedback?.kind ?? ""}`} aria-live="polite">
-          {feedback?.message ?? ""}
-        </div>
-      </section>
     </div>
   );
 }
@@ -3101,183 +1968,4 @@ function SettingsDialog({
       </section>
     </div>
   );
-}
-
-function DeleteTagDialog({
-  tagName,
-  language,
-  onConfirm,
-  onCancel,
-}: {
-  tagName: string;
-  language: LanguageMode;
-  onConfirm: () => void;
-  onCancel: () => void;
-}): ReactElement {
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  return (
-    <div className="dialog-backdrop" onMouseDown={onCancel}>
-      <div className="command-dialog" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dialog-title">
-          <span>{l("Delete Tag", "删除标签")}</span>
-          <button type="button" className="icon-button" onClick={onCancel} aria-label={l("Close", "关闭")}>
-            <X size={16} />
-          </button>
-        </div>
-        <p className="dialog-copy">
-          {l("Delete", "从所有会话中删除")} <strong>#{tagName}</strong>{l(" from all sessions?", "？")}
-        </p>
-        <div className="dialog-actions">
-          <button type="button" onClick={onCancel}>
-            {l("Cancel", "取消")}
-          </button>
-          <button type="button" className="danger-action" onClick={onConfirm}>
-            {l("Delete", "删除")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DeleteSessionDialog({
-  session,
-  language,
-  deleting,
-  onConfirm,
-  onCancel,
-}: {
-  session: SessionSearchResult;
-  language: LanguageMode;
-  deleting: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-}): ReactElement {
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  return (
-    <div className="dialog-backdrop" onMouseDown={onCancel}>
-      <div className="command-dialog delete-session-dialog" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dialog-title">
-          <span>{l("Delete Session", "删除会话")}</span>
-          <button type="button" className="icon-button" onClick={onCancel} disabled={deleting} aria-label={l("Close", "关闭")}>
-            <X size={16} />
-          </button>
-        </div>
-        <p className="dialog-copy">
-          {l("Delete", "删除")} <strong>{session.displayTitle}</strong>{l(" permanently?", "？")}
-        </p>
-        <p className="dialog-copy danger-copy">
-          {l(
-            "This deletes the original Codex or Claude Code session file and removes it from this app. This cannot be undone.",
-            "这会删除 Codex 或 Claude Code 的原始会话文件，并从本应用移除，无法撤销。",
-          )}
-        </p>
-        <div className="delete-session-path" title={session.filePath}>
-          {session.filePath}
-        </div>
-        <div className="dialog-actions">
-          <button type="button" onClick={onCancel} disabled={deleting}>
-            {l("Cancel", "取消")}
-          </button>
-          <button type="button" className="danger-action" onClick={onConfirm} disabled={deleting}>
-            {deleting ? l("Deleting...", "正在删除...") : l("Delete Permanently", "永久删除")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CommandDialog({
-  dialog,
-  tags,
-  language,
-  onChange,
-  onSubmit,
-  onCancel,
-}: {
-  dialog: NonNullable<DialogState>;
-  tags: string[];
-  language: LanguageMode;
-  onChange: (value: string) => void;
-  onSubmit: (value?: string) => void;
-  onCancel: () => void;
-}): ReactElement {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  const matchingTags = dialog.kind === "tag" ? tags.filter((tagName) => tagName.includes(dialog.value.trim())).slice(0, 6) : [];
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
-
-  return (
-    <div className="dialog-backdrop" onMouseDown={onCancel}>
-      <form
-        className="command-dialog"
-        onMouseDown={(event) => event.stopPropagation()}
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit();
-        }}
-      >
-        <div className="dialog-title">
-          <span>{dialog.kind === "rename" ? l("Rename Session", "重命名会话") : l("Add Tag", "添加标签")}</span>
-          <button type="button" className="icon-button" onClick={onCancel} aria-label={l("Close", "关闭")}>
-            <X size={16} />
-          </button>
-        </div>
-        <input
-          ref={inputRef}
-          value={dialog.value}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder={dialog.kind === "rename" ? l("Session title", "会话标题") : l("Tag name", "标签名")}
-        />
-        {matchingTags.length > 0 ? (
-          <div className="tag-suggestions">
-            {matchingTags.map((tagName) => (
-              <button key={tagName} type="button" onClick={() => onSubmit(tagName)}>
-                #{tagName}
-              </button>
-            ))}
-          </div>
-        ) : null}
-        <div className="dialog-actions">
-          <button type="button" onClick={onCancel}>
-            {l("Cancel", "取消")}
-          </button>
-          <button type="submit" className="primary-action">
-            {l("Save", "保存")}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function quotaStatusLabel(status: UsageQuotaCard["status"], language: LanguageMode): string {
-  if (status === "supported") return localize(language, "Live", "可用");
-  if (status === "unsupported_api_key") return localize(language, "Unsupported", "不支持");
-  if (status === "error") return localize(language, "Error", "错误");
-  return localize(language, "Setup", "设置");
-}
-
-function formatQuotaReset(resetsAt: string | undefined, language: LanguageMode): string {
-  if (!resetsAt) return "";
-  const timestamp = Date.parse(resetsAt);
-  if (!Number.isFinite(timestamp)) return "";
-  const diff = timestamp - Date.now();
-  if (diff <= 0) return localize(language, "reset due", "应重置");
-  const minutes = Math.ceil(diff / 60_000);
-  if (minutes < 60) return localize(language, `resets in ${minutes}m`, `${minutes} 分钟后重置`);
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    const remainingMinutes = minutes - hours * 60;
-    return remainingMinutes > 0
-      ? localize(language, `resets in ${hours}h ${remainingMinutes}m`, `${hours} 小时 ${remainingMinutes} 分钟后重置`)
-      : localize(language, `resets in ${hours}h`, `${hours} 小时后重置`);
-  }
-  const days = Math.ceil(hours / 24);
-  return localize(language, `resets in ${days}d`, `${days} 天后重置`);
 }

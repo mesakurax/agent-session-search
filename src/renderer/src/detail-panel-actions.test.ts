@@ -2,12 +2,13 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+const detailPanelSource = readFileSync(new URL("./components/detail-panel.tsx", import.meta.url), "utf8");
 const preloadSource = readFileSync(new URL("../../preload/index.ts", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("../../main/index.ts", import.meta.url), "utf8");
 
 describe("detail panel actions", () => {
   it("keeps resume routed and removes standalone terminal focus from the detail panel", () => {
-    const detailPanel = appSource.slice(appSource.indexOf("function DetailPanel"), appSource.indexOf("function MessageBlock"));
+    const detailPanel = detailPanelSource;
 
     expect(detailPanel).toContain("onResume");
     expect(detailPanel).toContain("onExportMarkdown");
@@ -42,5 +43,14 @@ describe("detail panel actions", () => {
     expect(mainSource).toContain("command:export-markdown");
     expect(mainSource).toContain("showSaveDialog");
     expect(mainSource).toContain("formatSessionMarkdown");
+  });
+
+  it("opens detail on the newest message window and pages older messages backward", () => {
+    expect(appSource).toContain("Math.max(0, fresh.messageCount - INITIAL_MESSAGE_LIMIT)");
+    expect(appSource).toContain("window.sessionSearch.getMessages(sessionKey, initialOffset, INITIAL_MESSAGE_LIMIT)");
+    expect(appSource).toContain("const nextOffset = Math.max(0, messageOffset - MESSAGE_PAGE_SIZE)");
+    expect(appSource).toContain("setMessages((current) => [...nextMessages, ...current])");
+    expect(detailPanelSource).toContain("olderMessageCount > 0");
+    expect(detailPanelSource).toContain("Show ${Math.min(messagePageSize, olderMessageCount)} older messages");
   });
 });
