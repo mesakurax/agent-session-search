@@ -3,6 +3,7 @@ import type { CSSProperties, MouseEventHandler, ReactElement } from "react";
 import {
   AppWindow,
   Archive,
+  Activity,
   ChevronDown,
   ChevronRight,
   Clipboard,
@@ -42,6 +43,7 @@ import type { IndexStatus } from "../../core/indexer";
 import { formatRelativeTime } from "../../core/format-session";
 import { QUOTA_REFRESH_INTERVAL_MS } from "../../core/refresh-policy";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
+import type { RemoteHealthReport } from "../../core/remote-health";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../core/skill-manager";
 import { globalShortcutOptions } from "../../core/shortcuts";
 import { terminalSelectOptions } from "../../core/terminal-options";
@@ -295,6 +297,8 @@ export function App(): ReactElement {
   const [skillsFeedback, setSkillsFeedback] = useState<SkillsFeedback>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback>(null);
+  const [environmentHealthReports, setEnvironmentHealthReports] = useState<Record<string, RemoteHealthReport>>({});
+  const [diagnosingEnvironmentId, setDiagnosingEnvironmentId] = useState<string | null>(null);
   const [skillHookInstalled, setSkillHookInstalled] = useState<boolean | null>(null);
   const [skillHookBusy, setSkillHookBusy] = useState(false);
   const [pendingPersonalSources, setPendingPersonalSources] = useState<{ claude: boolean; codex: boolean; codebuddy: boolean }>({
@@ -1040,10 +1044,30 @@ export function App(): ReactElement {
     }
   }
 
+  async function diagnoseEnvironment(environment: SessionEnvironment): Promise<void> {
+    if (environment.kind !== "ssh") return;
+    setDiagnosingEnvironmentId(environment.id);
+    setSettingsFeedback({ kind: "running", message: t(`Checking ${environment.label}...`, `正在检查 ${environment.label}...`) });
+    try {
+      const report = await window.sessionSearch.diagnoseEnvironment(environment.id);
+      setEnvironmentHealthReports((current) => ({ ...current, [environment.id]: report }));
+      setSettingsFeedback({ kind: report.ok ? "success" : "error", message: report.summary });
+    } catch (error) {
+      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setDiagnosingEnvironmentId((current) => (current === environment.id ? null : current));
+    }
+  }
+
   async function deleteEnvironment(environment: SessionEnvironment): Promise<void> {
     setSettingsFeedback({ kind: "running", message: t(`Deleting ${environment.label}...`, `正在删除 ${environment.label}...`) });
     try {
       await window.sessionSearch.deleteEnvironment(environment.id);
+      setEnvironmentHealthReports((current) => {
+        const next = { ...current };
+        delete next[environment.id];
+        return next;
+      });
       if (environmentId === environment.id) setEnvironmentId("all");
       if (projectEnvironmentId === environment.id) clearProjectFilter();
       await reloadEnvironmentData();
@@ -1590,6 +1614,8 @@ export function App(): ReactElement {
         <SettingsDialog
           settings={appSettings}
           environments={environments}
+          environmentHealthReports={environmentHealthReports}
+          diagnosingEnvironmentId={diagnosingEnvironmentId}
           theme={theme}
           language={language}
           feedback={settingsFeedback}
@@ -1602,6 +1628,7 @@ export function App(): ReactElement {
           skillHookBusy={skillHookBusy}
           onSkillHookChange={(enabled) => void toggleSkillUsageHook(enabled)}
           onRefreshEnvironment={(environment) => void refreshEnvironment(environment)}
+          onDiagnoseEnvironment={(environment) => void diagnoseEnvironment(environment)}
           onDeleteEnvironment={(environment) => void deleteEnvironment(environment)}
           onAddSsh={() => setSshDialogOpen(true)}
           onClose={() => setSettingsOpen(false)}
@@ -1959,6 +1986,8 @@ function ContextMenu({
 function SettingsDialog({
   settings,
   environments,
+  environmentHealthReports,
+  diagnosingEnvironmentId,
   theme,
   language,
   feedback,
@@ -1971,12 +2000,15 @@ function SettingsDialog({
   skillHookBusy,
   onSkillHookChange,
   onRefreshEnvironment,
+  onDiagnoseEnvironment,
   onDeleteEnvironment,
   onAddSsh,
   onClose,
 }: {
   settings: AppSettings | null;
   environments: SessionEnvironment[];
+  environmentHealthReports: Record<string, RemoteHealthReport>;
+  diagnosingEnvironmentId: string | null;
   theme: ThemeMode;
   language: LanguageMode;
   feedback: SettingsFeedback;
@@ -1989,6 +2021,7 @@ function SettingsDialog({
   skillHookBusy: boolean;
   onSkillHookChange: (enabled: boolean) => void;
   onRefreshEnvironment: (environment: SessionEnvironment) => void;
+  onDiagnoseEnvironment: (environment: SessionEnvironment) => void;
   onDeleteEnvironment: (environment: SessionEnvironment) => void;
   onAddSsh: () => void;
   onClose: () => void;
@@ -2105,37 +2138,69 @@ function SettingsDialog({
                   </button>
                 </header>
                 <div className="connection-list">
-                  {environments.map((environment) => (
-                    <div key={environment.id} className={`connection-row ${environmentStatus(environment)}`}>
-                      <div className="connection-icon">{environment.kind === "local" ? <Laptop size={15} /> : <Server size={15} />}</div>
-                      <div className="connection-main">
-                        <span className="connection-title">{environment.label}</span>
-                        <span className="connection-target">{environmentTarget(environment, language)}</span>
-                        {environment.lastError ? <span className="connection-error">{environment.lastError}</span> : null}
-                      </div>
-                      <span className="connection-status">{environmentStatusLabel(environment, language)}</span>
-                      {environment.kind === "ssh" ? (
-                        <div className="connection-actions">
-                          <button
-                            className="icon-button"
-                            onClick={() => onRefreshEnvironment(environment)}
-                            title={l("Refresh", "刷新")}
-                            aria-label={l(`Refresh ${environment.label}`, `刷新 ${environment.label}`)}
-                          >
-                            <RefreshCw size={14} />
-                          </button>
-                          <button
-                            className="icon-button danger"
-                            onClick={() => onDeleteEnvironment(environment)}
-                            title={l("Delete", "删除")}
-                            aria-label={l(`Delete ${environment.label}`, `删除 ${environment.label}`)}
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                  {environments.map((environment) => {
+                    const report = environmentHealthReports[environment.id];
+                    const diagnosing = diagnosingEnvironmentId === environment.id;
+                    return (
+                      <div key={environment.id} className={`connection-row ${environmentStatus(environment)} ${report ? "with-diagnostics" : ""}`}>
+                        <div className="connection-icon">{environment.kind === "local" ? <Laptop size={15} /> : <Server size={15} />}</div>
+                        <div className="connection-main">
+                          <span className="connection-title">{environment.label}</span>
+                          <span className="connection-target">{environmentTarget(environment, language)}</span>
+                          {environment.lastError ? <span className="connection-error">{environment.lastError}</span> : null}
                         </div>
-                      ) : null}
-                    </div>
-                  ))}
+                        <span className="connection-status">{environmentStatusLabel(environment, language)}</span>
+                        {environment.kind === "ssh" ? (
+                          <div className="connection-actions">
+                            <button
+                              className="icon-button"
+                              disabled={diagnosing}
+                              onClick={() => onDiagnoseEnvironment(environment)}
+                              title={l("Diagnose", "诊断")}
+                              aria-label={l(`Diagnose ${environment.label}`, `诊断 ${environment.label}`)}
+                            >
+                              <Activity size={14} />
+                            </button>
+                            <button
+                              className="icon-button"
+                              onClick={() => onRefreshEnvironment(environment)}
+                              title={l("Refresh", "刷新")}
+                              aria-label={l(`Refresh ${environment.label}`, `刷新 ${environment.label}`)}
+                            >
+                              <RefreshCw size={14} />
+                            </button>
+                            <button
+                              className="icon-button danger"
+                              onClick={() => onDeleteEnvironment(environment)}
+                              title={l("Delete", "删除")}
+                              aria-label={l(`Delete ${environment.label}`, `删除 ${environment.label}`)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ) : null}
+                        {report ? (
+                          <div className="connection-diagnostics">
+                            <div className="connection-diagnostics-head">
+                              <span>{report.summary}</span>
+                              <time>{formatRelativeTime(report.checkedAt)}</time>
+                            </div>
+                            <div className="connection-diagnostic-list">
+                              {report.checks.map((check) => (
+                                <div key={check.id} className={`connection-diagnostic-check ${check.status}`}>
+                                  <span className="connection-diagnostic-dot" />
+                                  <span className="connection-diagnostic-label">{check.label}</span>
+                                  <span className="connection-diagnostic-message" title={check.detail ?? check.message}>
+                                    {check.message}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
             ) : null}

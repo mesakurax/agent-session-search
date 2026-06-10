@@ -4,6 +4,7 @@ import type { ApplyClaudeProfileResult } from "../core/claude-profile";
 import type { ApplyCodexProfileResult } from "../core/codex-profile";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import type { IndexStatus } from "../core/indexer";
+import type { RemoteHealthReport } from "../core/remote-health";
 import type { ResumeRouteResult } from "../core/resume-router";
 import type { DeleteInstalledSkillResult, InstalledSkillsSnapshot } from "../core/skill-manager";
 import type { SkillUsageRefreshStatus } from "../core/skill-usage";
@@ -42,6 +43,7 @@ const api = {
     ipcRenderer.invoke("environment:save", environment),
   deleteEnvironment: (environmentId: string): Promise<void> => ipcRenderer.invoke("environment:delete", environmentId),
   refreshEnvironment: (environmentId: string): Promise<void> => ipcRenderer.invoke("environment:refresh", environmentId),
+  diagnoseEnvironment: (environmentId: string): Promise<RemoteHealthReport> => ipcRenderer.invoke("environment:diagnose", environmentId),
   setCustomTitle: (sessionKey: string, title: string | null): Promise<void> => ipcRenderer.invoke("title:set", sessionKey, title),
   addTag: (sessionKey: string, tagName: string): Promise<void> => ipcRenderer.invoke("tag:add", sessionKey, tagName),
   removeTag: (sessionKey: string, tagName: string): Promise<void> => ipcRenderer.invoke("tag:remove", sessionKey, tagName),

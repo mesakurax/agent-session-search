@@ -54,14 +54,15 @@ describe("resume commands", () => {
     );
   });
 
-  it("builds a cmd-compatible cd prefix on Windows", () => {
+  it("builds a cmd-compatible cd prefix when Windows terminal is Cmd", () => {
     const session = {
       source: "claude-cli",
       rawId: "abc",
       projectPath: "C:\\my repo",
     } as SessionSearchResult;
+    const settings = { ...defaultSettings, defaultTerminal: "Cmd" as const };
 
-    expect(getResumeCommand(session, defaultSettings, { platform: "win32" })).toBe(
+    expect(getResumeCommand(session, settings, { platform: "win32" })).toBe(
       'cd /d "C:\\my repo" && claude --resume abc',
     );
   });
@@ -93,14 +94,15 @@ describe("resume commands", () => {
     );
   });
 
-  it("keeps local Windows non-ssh quoting unchanged for cmd metacharacters", () => {
+  it("keeps local Windows Cmd quoting unchanged for cmd metacharacters", () => {
     const session = {
       source: "claude-cli",
       rawId: "abc",
       projectPath: "C:\\repo %USERNAME% & tools",
     } as SessionSearchResult;
+    const settings = { ...defaultSettings, defaultTerminal: "Cmd" as const };
 
-    expect(getResumeCommand(session, defaultSettings, { platform: "win32" })).toBe(
+    expect(getResumeCommand(session, settings, { platform: "win32" })).toBe(
       'cd /d "C:\\repo %USERNAME% & tools" && claude --resume abc',
     );
   });
@@ -163,8 +165,9 @@ describe("resume commands", () => {
       rawId: "codex-1",
       projectPath: "/repo with spaces",
     } as SessionSearchResult;
+    const settings = { ...defaultSettings, defaultTerminal: "Cmd" as const };
 
-    const command = getResumeCommand(session, defaultSettings, {
+    const command = getResumeCommand(session, settings, {
       platform: "win32",
       sshTarget: "dev@example.com",
     });
@@ -195,8 +198,9 @@ describe("resume commands", () => {
       rawId: "codex %USERNAME% $HOME",
       projectPath: "/repo %USERNAME% $HOME",
     } as SessionSearchResult;
+    const settings = { ...defaultSettings, defaultTerminal: "Cmd" as const };
 
-    const command = getResumeCommand(session, defaultSettings, {
+    const command = getResumeCommand(session, settings, {
       platform: "win32",
       sshTarget: "dev@example.com",
     });

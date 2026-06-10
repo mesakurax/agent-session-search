@@ -2616,6 +2616,10 @@ select:focus-visible {
   background: var(--panel-subtle);
 }
 
+.connection-row.with-diagnostics {
+  align-items: start;
+}
+
 .connection-icon {
   display: grid;
   place-items: center;
@@ -2687,6 +2691,90 @@ select:focus-visible {
 .connection-actions .icon-button {
   width: 28px;
   height: 28px;
+}
+
+.connection-actions .icon-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.connection-diagnostics {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.connection-diagnostics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.connection-diagnostics-head time {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-weight: 550;
+}
+
+.connection-diagnostic-list {
+  display: grid;
+  gap: 5px;
+}
+
+.connection-diagnostic-check {
+  display: grid;
+  grid-template-columns: 8px minmax(90px, 0.35fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.connection-diagnostic-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.connection-diagnostic-check.ok .connection-diagnostic-dot {
+  background: var(--success-text);
+}
+
+.connection-diagnostic-check.warning .connection-diagnostic-dot {
+  background: var(--running-text);
+}
+
+.connection-diagnostic-check.error .connection-diagnostic-dot {
+  background: var(--danger);
+}
+
+.connection-diagnostic-check.error {
+  color: var(--danger);
+}
+
+.connection-diagnostic-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-diagnostic-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .icon-button.danger:hover {

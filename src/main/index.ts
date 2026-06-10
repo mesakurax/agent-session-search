@@ -40,6 +40,7 @@ import { loadUsageQuotaSnapshot } from "../core/quota";
 import { focusLiveSessionTerminal } from "../core/session-focus";
 import { loadLiveSessionSnapshot } from "../core/session-activity";
 import { routeResumeSession } from "../core/resume-router";
+import { diagnoseRemoteEnvironment, preflightRemoteSessionResume } from "../core/remote-health";
 import { fetchRemoteSessionFilePayload, syncRemoteEnvironment } from "../core/remote-sync";
 import { loadRemoteSessionDetailPayload } from "../core/remote-session-loader";
 import { RemoteEnvironmentLifecycle } from "../core/remote-environment-lifecycle";
@@ -56,7 +57,13 @@ import { buildSshArgs, readUserSshConfig } from "../core/ssh-config";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
 import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
-import type { EnvironmentUpsertInput, SearchOptions, SessionSearchResult, SessionStatsOptions } from "../core/types";
+import type {
+  EnvironmentUpsertInput,
+  SearchOptions,
+  SessionEnvironment,
+  SessionSearchResult,
+  SessionStatsOptions,
+} from "../core/types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PRODUCT_NAME = "Agent-Session-Search";
@@ -293,6 +300,30 @@ function requireSshArgsForRemoteSession(session: SessionSearchResult): string[] 
     throw new Error("SSH environment is not available for this remote session.");
   }
   return sshArgs;
+}
+
+function requireRemoteSshEnvironment(session: SessionSearchResult): SessionEnvironment | null {
+  if (isLocalSession(session)) return null;
+  const environment = store.getEnvironment(session.environmentId);
+  if (!environment || environment.kind !== "ssh") throw new Error("SSH environment is not available for this remote session.");
+  return environment;
+}
+
+function requireSshEnvironment(environmentId: string): SessionEnvironment {
+  const environment = store.getEnvironment(environmentId);
+  if (!environment) throw new Error("SSH environment was not found.");
+  if (environment.kind !== "ssh") throw new Error("Diagnostics are only available for SSH environments.");
+  return environment;
+}
+
+async function ensureRemoteResumePreflight(session: SessionSearchResult): Promise<void> {
+  const environment = requireRemoteSshEnvironment(session);
+  if (!environment) return;
+  const report = await preflightRemoteSessionResume(environment, session);
+  const errors = report.checks.filter((check) => check.status === "error");
+  if (errors.length === 0) return;
+  const detail = errors.map((check) => `${check.label}: ${check.message}`).join("; ");
+  throw new Error(`Remote resume preflight failed: ${detail}`);
 }
 
 async function ensureRemoteSessionDetailsLoaded(sessionKey: string): Promise<void> {
@@ -643,6 +674,9 @@ function registerIpc(): void {
   ipcMain.handle("environment:refresh", (_event, environmentId: string) =>
     ensureRemoteEnvironmentLifecycle().refreshEnvironment(environmentId),
   );
+  ipcMain.handle("environment:diagnose", (_event, environmentId: string) =>
+    diagnoseRemoteEnvironment(requireSshEnvironment(environmentId)),
+  );
   ipcMain.handle("title:set", (_event, sessionKey: string, title: string | null) => store.setCustomTitle(sessionKey, title));
   ipcMain.handle("tag:add", (_event, sessionKey: string, tagName: string) => store.addTag(sessionKey, tagName));
   ipcMain.handle("tag:remove", (_event, sessionKey: string, tagName: string) => store.removeTag(sessionKey, tagName));
@@ -712,6 +746,7 @@ function registerIpc(): void {
     if (!session) return { route: "resume" as const };
     const sshArgs = requireSshArgsForRemoteSession(session);
     if (!isLocalSession(session)) {
+      await ensureRemoteResumePreflight(session);
       await openResumeInTerminal(session, getSettings(), { sshArgs });
       store.markResumed(sessionKey);
       return { route: "resume" as const };
@@ -732,6 +767,7 @@ function registerIpc(): void {
     const session = store.getSession(sessionKey);
     if (!session) return;
     const sshArgs = requireSshArgsForRemoteSession(session);
+    await ensureRemoteResumePreflight(session);
     await openResumeInSpecificTerminal(session, getSettings(), "iTerm", { sshArgs });
     store.markResumed(sessionKey);
   });

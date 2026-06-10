@@ -79,6 +79,7 @@ describe("detail panel actions", () => {
       "environment:save",
       "environment:delete",
       "environment:refresh",
+      "environment:diagnose",
       "environments-updated",
     ]) {
       expect(preloadSource).toContain(channel);
@@ -89,6 +90,7 @@ describe("detail panel actions", () => {
     expect(preloadSource).toContain("saveEnvironment");
     expect(preloadSource).toContain("deleteEnvironment");
     expect(preloadSource).toContain("refreshEnvironment");
+    expect(preloadSource).toContain("diagnoseEnvironment");
     expect(preloadSource).toContain("onEnvironmentsUpdated");
   });
 
@@ -138,5 +140,31 @@ describe("detail panel actions", () => {
       );
     }
     expect(mainHandlerSource("command:copy-resume")).toContain("async (_event, sessionKey: string)");
+  });
+
+  it("preflights remote resume before opening terminals", () => {
+    expect(mainSource).toContain("preflightRemoteSessionResume");
+    expect(mainSource).toContain("ensureRemoteResumePreflight");
+    expect(mainSource).toContain("Remote resume preflight failed:");
+
+    for (const channel of ["command:resume", "command:resume-iterm"]) {
+      const handler = mainHandlerSource(channel);
+      expect(handler).toContain("await ensureRemoteResumePreflight(session)");
+      expect(handler.indexOf("await ensureRemoteResumePreflight(session)")).toBeLessThan(
+        handler.indexOf("openResumeIn"),
+      );
+    }
+    expect(mainHandlerSource("command:copy-resume")).not.toContain("ensureRemoteResumePreflight");
+  });
+
+  it("renders remote environment diagnostics in settings", () => {
+    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"), appSource.indexOf("function SettingsSection"));
+
+    expect(appSource).toContain("environmentHealthReports");
+    expect(appSource).toContain("diagnosingEnvironmentId");
+    expect(appSource).toContain("window.sessionSearch.diagnoseEnvironment(environment.id)");
+    expect(settingsDialog).toContain("onDiagnoseEnvironment");
+    expect(settingsDialog).toContain("connection-diagnostics");
+    expect(settingsDialog).toContain("connection-diagnostic-check");
   });
 });
